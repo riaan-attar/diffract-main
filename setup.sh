@@ -167,8 +167,21 @@ print_warning "Installing CLI dependencies..."
 npm install
 print_warning "Building CLI typescript project..."
 npm run build:cli
+# Fix permissions on NemoClaw wrapper binaries before installing globally
+print_warning "Fixing execute permissions for NemoClaw binaries..."
+chmod +x "./bin/nemoclaw.js" 2>/dev/null || true
+chmod +x "./bin/nemohermes.js" 2>/dev/null || true
+print_success "NemoClaw execute bits patched"
+
 print_warning "Installing NemoClaw CLI globally..."
 npm install -g .
+
+# Double insurance: ensure global binaries themselves have execute permissions
+NEMOCLAW_GLOBAL_PATH=$(which nemoclaw 2>/dev/null || true)
+NEMOHERMES_GLOBAL_PATH=$(which nemohermes 2>/dev/null || true)
+[ -n "$NEMOCLAW_GLOBAL_PATH" ] && chmod +x "$NEMOCLAW_GLOBAL_PATH" 2>/dev/null || true
+[ -n "$NEMOHERMES_GLOBAL_PATH" ] && chmod +x "$NEMOHERMES_GLOBAL_PATH" 2>/dev/null || true
+
 cd "$PROJECT_ROOT"
 print_success "NemoClaw CLI installed globally"
 
@@ -181,12 +194,6 @@ if [ "$USE_VPS" = true ]; then
         print_error "diffractui directory not found at $UI_DIR!"
         exit 1
     fi
-
-    # Fix permissions on NemoClaw wrapper binaries
-    print_warning "Fixing execute permissions for NemoClaw binaries..."
-    chmod +x "$NEMOCLAW_DIR/bin/nemoclaw.js" 2>/dev/null || true
-    chmod +x "$NEMOCLAW_DIR/bin/nemohermes.js" 2>/dev/null || true
-    print_success "NemoClaw execute bits patched"
 
     # Build Web UI Next.js app
     print_warning "Building Next.js UI Application..."
@@ -249,6 +256,12 @@ EOF
         handle_path /agent/* {
             reverse_proxy 127.0.0.1:9119 {
                 header_up Host {upstream_hostport}
+                header_up X-Forwarded-Prefix /agent
+            }
+        }
+        handle /assets/* {
+            reverse_proxy 127.0.0.1:9119 {
+                header_up Host {upstream_hostport}
             }
         }
         handle {
@@ -259,6 +272,12 @@ EOF
         print_success "Configuring Caddy for domain: $DOMAIN"
         CADDY_CONFIG="$DOMAIN {
         handle_path /agent/* {
+            reverse_proxy 127.0.0.1:9119 {
+                header_up Host {upstream_hostport}
+                header_up X-Forwarded-Prefix /agent
+            }
+        }
+        handle /assets/* {
             reverse_proxy 127.0.0.1:9119 {
                 header_up Host {upstream_hostport}
             }
