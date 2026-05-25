@@ -202,6 +202,19 @@ if [ "$USE_VPS" = true ]; then
     npm run build
     print_success "UI built successfully"
 
+    # Sync and build Hermes UI
+    print_warning "Syncing and Building custom Hermes UI..."
+    HERMES_UI_DIR="$PROJECT_ROOT/hermes-ui"
+    if [ -d "$HERMES_UI_DIR" ] && [ -d "/usr/local/lib/hermes-agent/web" ]; then
+        cp -a "$HERMES_UI_DIR/." /usr/local/lib/hermes-agent/web/
+        cd /usr/local/lib/hermes-agent/web
+        npm install
+        npm run build
+        print_success "Hermes UI custom built successfully"
+    else
+        print_warning "Skipping custom Hermes UI build (not found)"
+    fi
+
     # Create & start systemd diffractui service
     print_warning "Configuring Systemd service..."
     NODE_PATH=$(which node || echo "/usr/bin/node")
