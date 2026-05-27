@@ -258,57 +258,18 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-    # Install dependencies for the wrapper script
-    apt-get install -y jq socat
-
-    cat <<'EOF' > /usr/local/bin/start-hermes-dashboard.sh
-#!/bin/bash
-set -e
-SANDBOX_NAME=$(jq -r ".defaultSandbox" ~/.nemoclaw/sandboxes.json)
-if [ -z "$SANDBOX_NAME" ] || [ "$SANDBOX_NAME" = "null" ]; then
-    echo "No default sandbox found."
-    sleep 5
-    exit 1
-fi
-CONTAINER_ID=$(docker ps -q -f "name=openshell-${SANDBOX_NAME}")
-if [ -z "$CONTAINER_ID" ]; then
-    echo "Sandbox container not running. Retrying in 5s..."
-    sleep 5
-    exit 1
-fi
-
-echo "Cleaning up any existing dashboards in container..."
-docker exec $CONTAINER_ID /opt/hermes/.venv/bin/python /usr/local/bin/hermes dashboard --stop || true
-
-echo "Copying UI assets to container $CONTAINER_ID..."
-docker exec $CONTAINER_ID mkdir -p /opt/hermes/web_dist
-docker cp /usr/local/lib/hermes-agent/hermes_cli/web_dist/. $CONTAINER_ID:/opt/hermes/web_dist/
-
-echo "Finding container IP..."
-CONTAINER_IP=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $CONTAINER_ID)
-
-echo "Starting socat forwarder on port 9119 to $CONTAINER_IP:9119..."
-socat TCP-LISTEN:9119,fork,reuseaddr TCP:$CONTAINER_IP:9119 &
-SOCAT_PID=$!
-trap "kill $SOCAT_PID; docker exec $CONTAINER_ID /opt/hermes/.venv/bin/python /usr/local/bin/hermes dashboard --stop || true" EXIT
-
-echo "Starting dashboard in container..."
-docker exec -e HERMES_WEB_DIST=/opt/hermes/web_dist $CONTAINER_ID /opt/hermes/.venv/bin/python /usr/local/bin/hermes dashboard --host 0.0.0.0 --skip-build --insecure
-EOF
-    chmod +x /usr/local/bin/start-hermes-dashboard.sh
-
-    # Create & start systemd hermes dashboard service
-    cat <<EOF > /etc/systemd/system/hermes-dashboard.service
+    # Create & start systemd hermes-web service
+    cat <<EOF > /etc/systemd/system/hermes-web.service
 [Unit]
-Description=Hermes Dashboard UI Server (In-Sandbox)
-After=network.target docker.service
+Description=Hermes Web UI (Vite Dev Server)
+After=network.target
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/usr/local/lib/hermes-agent
+WorkingDirectory=/usr/local/lib/hermes-agent/web
 Environment=PATH=$PATH
-ExecStart=/usr/local/bin/start-hermes-dashboard.sh
+ExecStart=$NPM_PATH run dev -- --port 5173 --host
 Restart=always
 RestartSec=5
 
@@ -317,8 +278,10 @@ WantedBy=multi-user.target
 EOF
 
     systemctl daemon-reload
-    systemctl enable diffractui hermes-dashboard
-    systemctl restart diffractui hermes-dashboard
+    systemctl disable hermes-dashboard || true
+    systemctl stop hermes-dashboard || true
+    systemctl enable diffractui hermes-web
+    systemctl restart diffractui hermes-web
 
     sleep 3
     if systemctl is-active --quiet diffractui; then
@@ -342,13 +305,13 @@ EOF
         print_warning "No domain name argument specified. Proxying on port 80..."
         CADDY_CONFIG=":80 {
         handle_path /agent/* {
-            reverse_proxy 127.0.0.1:9119 {
+            reverse_proxy 127.0.0.1:5173 {
                 header_up Host {upstream_hostport}
                 header_up X-Forwarded-Prefix /agent
             }
         }
         handle /assets/* {
-            reverse_proxy 127.0.0.1:9119 {
+            reverse_proxy 127.0.0.1:5173 {
                 header_up Host {upstream_hostport}
             }
         }
@@ -360,13 +323,13 @@ EOF
         print_success "Configuring Caddy for domain: $DOMAIN"
         CADDY_CONFIG="$DOMAIN {
         handle_path /agent/* {
-            reverse_proxy 127.0.0.1:9119 {
+            reverse_proxy 127.0.0.1:5173 {
                 header_up Host {upstream_hostport}
                 header_up X-Forwarded-Prefix /agent
             }
         }
         handle /assets/* {
-            reverse_proxy 127.0.0.1:9119 {
+            reverse_proxy 127.0.0.1:5173 {
                 header_up Host {upstream_hostport}
             }
         }
