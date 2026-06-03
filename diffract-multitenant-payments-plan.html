@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Diffract — Multi-tenant + Dodo Payments Plan</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --surface: #171a21;
+    --surface-2: #1e222b;
+    --border: #2a2f3a;
+    --text: #e6e8ec;
+    --muted: #9aa3b2;
+    --accent: #FFBF00;
+    --accent-2: #CD7F32;
+    --green: #34d399;
+    --red: #f87171;
+    --blue: #60a5fa;
+    --code-bg: #11141a;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.doc {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 24px; margin-bottom: 32px;
+  }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 8px; }
+  h1 .sub { color: var(--accent); }
+  .meta { color: var(--muted); font-size: 14px; }
+  .meta b { color: var(--text); font-weight: 600; }
+  h2 {
+    font-size: 22px; margin: 44px 0 12px; padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+  h2:first-of-type { border-top: none; }
+  h3 { font-size: 17px; margin: 26px 0 8px; color: #fff; }
+  p { margin: 10px 0; }
+  a { color: var(--blue); }
+  ul, ol { margin: 10px 0; padding-left: 22px; }
+  li { margin: 5px 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px; background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 5px; padding: 1px 6px;
+  }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 18px; overflow-x: auto; font-size: 12.5px; line-height: 1.5;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: #cdd3dc;
+  }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; }
+  table {
+    width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14.5px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden;
+  }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--surface-2); color: #fff; font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  .callout {
+    border: 1px solid var(--border); border-left: 4px solid var(--accent);
+    background: var(--surface); border-radius: 8px; padding: 14px 18px; margin: 16px 0;
+  }
+  .callout.rec { border-left-color: var(--green); }
+  .callout.warn { border-left-color: var(--red); }
+  .callout .label {
+    display: inline-block; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    font-weight: 700; color: var(--accent); margin-bottom: 4px;
+  }
+  .callout.rec .label { color: var(--green); }
+  .callout.warn .label { color: var(--red); }
+  .tag {
+    display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+    background: rgba(255,191,0,.12); color: var(--accent); border: 1px solid rgba(255,191,0,.3);
+    vertical-align: middle; margin-left: 8px;
+  }
+  .toc { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 20px; margin: 24px 0; }
+  .toc ol { columns: 2; -webkit-columns: 2; margin: 6px 0; }
+  .toc a { color: var(--text); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .muted { color: var(--muted); }
+  hr { border: none; border-top: 1px solid var(--border); margin: 36px 0; }
+  .pill-green { color: var(--green); font-weight: 600; }
+  footer.doc { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="doc">
+    <h1>Diffract — <span class="sub">Multi-tenant + Dodo Payments</span> architecture plan</h1>
+    <p class="meta">
+      <b>Status:</b> Draft / design only (no code changes) &nbsp;•&nbsp;
+      <b>Created:</b> 2026-06-03 &nbsp;•&nbsp;
+      <b>Scope:</b> per-client subdomains on <code>diffraction.in</code>, Dodo Payments, automated provisioning
+    </p>
+  </header>
+
+  <div class="callout">
+    <span class="label">Context</span>
+    Builds on the current single-tenant stack: one VPS, Caddy fronting <code>diffractui</code> (<code>:3000</code>),
+    the Hermes dashboard (<code>:9119</code>) and agent API (<code>:8642</code>), with the model API key held in
+    <b>OpenShell's provider store on the host</b> and injected at the egress proxy. Goal: turn this into a paid,
+    multi-tenant product where each client gets <code>client.diffraction.in/</code> (Diffract dashboard) and
+    <code>client.diffraction.in/client/agent-chat</code> (their agent), provisioned automatically on payment.
+  </div>
+
+  <nav class="toc">
+    <b>Contents</b>
+    <ol>
+      <li><a href="#decisions">Two decisions first</a></li>
+      <li><a href="#arch">Target architecture</a></li>
+      <li><a href="#dns">Domain / DNS / TLS</a></li>
+      <li><a href="#routing">Per-client routing</a></li>
+      <li><a href="#registry">Tenant registry / DB</a></li>
+      <li><a href="#provisioning">Provisioning pipeline</a></li>
+      <li><a href="#dodo">Dodo Payments</a></li>
+      <li><a href="#auth">Auth (prerequisite)</a></li>
+      <li><a href="#ui">diffractui changes</a></li>
+      <li><a href="#rollout">Phased rollout</a></li>
+      <li><a href="#open">Decisions needed</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="decisions">0. Two decisions to make first (everything follows)</h2>
+
+  <h3>Decision A — Isolation model <span class="tag">load-bearing</span></h3>
+  <table>
+    <tr><th></th><th>VPS-per-client <span class="pill-green">(recommended v1)</span></th><th>Container-per-client (shared VPS)</th></tr>
+    <tr><td><b>Isolation</b></td><td>Full OS/host isolation per client</td><td>OpenShell isolates agents, but host (Caddy, docker socket, <b>OpenShell key store</b>) is shared</td></tr>
+    <tr><td><b>Reuse of current stack</b></td><td><code>setup.sh</code>/Caddy/diffractui run <b>unchanged</b>, parameterized by domain</td><td>Requires tenant-aware diffractui, port multiplexing, host hardening</td></tr>
+    <tr><td><b>Cost / density</b></td><td>Higher $/client</td><td>Cheaper, denser</td></tr>
+    <tr><td><b>Provisioning time</b></td><td>Minutes (need a "preparing…" state or warm pool)</td><td>Seconds</td></tr>
+  </table>
+  <div class="callout rec">
+    <span class="label">Recommendation</span>
+    <b>VPS-per-client for v1.</b> Two facts push hard that way: (1) the product <i>is</i> security isolation — co-tenanting
+    agents on one host undercuts the pitch; (2) the model API keys live in <b>OpenShell's provider store on the host</b> and
+    are injected at the egress proxy — on a shared host, every client's credentials sit in one store. Container-per-client is
+    the right <i>density optimization later</i>, after auth + host hardening exist.
+  </div>
+
+  <h3>Decision B — Who pays for inference?</h3>
+  <ul>
+    <li><b>(a) Client brings their own API key</b> <span class="pill-green">(recommended)</span> — onboard already collects it. Dodo just gates the Diffract service/seat. Simple.</li>
+    <li><b>(b) Diffract provides metered inference on its own key</b> — needs usage metering, quotas, overage billing, abuse protection. Much larger build.</li>
+  </ul>
+  <div class="callout rec">
+    <span class="label">Recommendation</span>
+    <b>(a) BYO-key</b> — matches "onboard Diffract on his business" and keeps Dodo to subscription gating.
+    <span class="muted">The rest of this plan assumes <b>VPS-per-client + BYO-key</b>; choosing differently changes §4–§6 materially.</span>
+  </div>
+
+  <h2 id="arch">1. Target architecture: control plane + per-tenant data plane</h2>
+  <pre><code>                        ┌─────────────────────────────────────────┐
+   Dodo Payments  ──────▶  CONTROL PLANE (new, central)            │
+   (checkout +          │   • Dodo webhook receiver (idempotent)   │
+    webhooks)           │   • Tenant DB (source of truth)          │
+                        │   • Provisioner (VPS API + cloud-init)   │
+                        │   • Auth / tenant login                  │
+                        └───────────────┬─────────────────────────┘
+                                        │ provisions + registers
+   *.diffraction.in  ─DNS(wildcard)─▶ ┌─┴───────────────────────┐
+   (one A record)                     │  CENTRAL CADDY INGRESS   │  wildcard TLS (DNS-01)
+                                      │  Host→backend from DB    │
+                                      └──┬────────────┬──────────┘
+                          client.diffraction.in   acme.diffraction.in
+                                      │                │
+                              ┌───────▼──────┐  ┌──────▼───────┐
+                              │ Client VPS   │  │ Client VPS   │   ← today's single-tenant
+                              │ diffractui   │  │ diffractui   │     stack, one per client
+                              │ hermes box   │  │ hermes box   │
+                              └──────────────┘  └──────────────┘</code></pre>
+  <p>The <b>central Caddy ingress</b> is the key simplifier: it terminates <code>*.diffraction.in</code>, looks up the
+  subdomain in the tenant DB, and reverse-proxies to that client's VPS. Result: <b>one wildcard DNS record + one wildcard
+  cert</b> — no per-client DNS automation.</p>
+
+  <h2 id="dns">2. Domain, DNS, TLS (replacing the hardcoded host)</h2>
+  <div class="callout warn">
+    <span class="label">Verify first</span>
+    Do we have <b>programmatic DNS control</b> for <code>diffraction.in</code> (a provider API token)? This gates the whole automation story.
+  </div>
+  <ul>
+    <li><b>DNS:</b> one wildcard record <code>*.diffraction.in → ingress IP</code>. New clients need <b>zero</b> DNS changes — the subdomain only has to exist in the tenant DB.</li>
+    <li><b>TLS:</b> wildcard cert for <code>*.diffraction.in</code> via <b>DNS-01</b> on the ingress. Prefer this over Caddy's on-demand-per-subdomain TLS, which hits Let's Encrypt rate limits at scale and needs an <code>ask</code> endpoint to bound issuance.</li>
+    <li><b>Replace <code>srv1670849.hstgr.cloud</code>:</b> in the target model the per-client VPS no longer needs a public Caddy (the ingress does TLS + routing). Each VPS just exposes <code>3000 / 9119 / 8642</code> to the ingress over a <b>private network / firewall allowlisted to the ingress IP</b>. <code>setup.sh</code> becomes "install + bind services," not "own a public domain."</li>
+    <li><b>Immediate step for the existing client:</b> point e.g. <code>client.diffraction.in</code> at the current VPS now (directly or via the ingress) to retire the <code>*.hstgr.cloud</code> URL without waiting for the full build.</li>
+  </ul>
+
+  <h2 id="routing">3. Per-client routing <span class="tag">config, not new architecture</span></h2>
+  <p>A generalization of the <code>/</code> + <code>/agent</code> split already fixed and verified. At the ingress, per <code>Host: &lt;tenant&gt;.diffraction.in</code>:</p>
+  <table>
+    <tr><th>Path</th><th>→ backend</th><th>Notes</th></tr>
+    <tr><td><code>/</code></td><td>client VPS <code>:3000</code> (diffractui)</td><td>the Diffract dashboard</td></tr>
+    <tr><td><code>/client/agent-chat/*</code></td><td>client VPS <code>:9119</code> (Hermes dashboard)</td><td>strip prefix; set <code>X-Forwarded-Prefix: /client/agent-chat</code></td></tr>
+    <tr><td><code>/client/agent-chat/assets/*</code></td><td><code>:9119</code></td><td>dashboard already rewrites <code>/assets/</code> → <code>{prefix}/assets/</code></td></tr>
+    <tr><td><code>/v1/*</code></td><td>client VPS <code>:8642</code> (agent API)</td><td>optional public exposure</td></tr>
+  </table>
+  <p>The Hermes dashboard already honors any prefix (<code>X-Forwarded-Prefix → window.__HERMES_BASE_PATH__</code>), and its
+  chat WS becomes <code>/client/agent-chat/api/ws</code> — the exact mechanism exercised this session. Mounting the agent at
+  <code>/client/agent-chat</code> is a one-line prefix change, not new work.</p>
+  <div class="callout">
+    <span class="label">Clarify (non-blocking)</span>
+    In <code>client.diffraction.in/client/agent-chat</code>, is <code>/client/</code> a <b>literal</b> brand segment, or the
+    <b>tenant name</b> (<code>acme.diffraction.in/acme/agent-chat</code>)? Either way it's one prefix-config line.
+  </div>
+
+  <h2 id="registry">4. Tenant registry / DB (source of truth — <span class="muted">not <code>sandboxes.json</code></span>)</h2>
+  <p>A small central database the control plane and ingress both read. Minimum fields:</p>
+  <ul>
+    <li><code>subdomain</code> (e.g. <code>acme</code>), <code>display_name</code></li>
+    <li><code>status</code>: <code>pending_payment → provisioning → active → suspended → deprovisioned</code></li>
+    <li><code>backend</code> — VPS id / IP / port set (3000/9119/8642)</li>
+    <li><code>dodo_customer_id</code>, <code>dodo_subscription_id</code>, plan, <code>current_period_end</code></li>
+    <li><code>provisioning_state</code> + last error (for rollback/retry)</li>
+    <li>auth linkage (tenant owner + members), timestamps</li>
+  </ul>
+  <p class="muted"><code>~/.nemoclaw/sandboxes.json</code> stays a per-VPS local detail; it is <b>not</b> the multi-tenant source of truth.</p>
+
+  <h2 id="provisioning">5. Provisioning pipeline <span class="tag">the actual core</span></h2>
+  <pre><code>Dodo webhook (payment / subscription active)
+  → verify signature  → idempotency check (dedupe retries)
+  → create tenant row (status=provisioning)
+  → provision backend:  VPS API create (or claim from warm pool)
+                        cloud-init runs the Diffract installer (BYO-key from onboard)
+  → register subdomain → backend in tenant DB   (ingress picks it up; no DNS call)
+  → health-check (diffractui:3000, dashboard:9119 chat WS 101, /v1/health)
+  → status=active  → email client their URL
+  ── on any failure: rollback + alert; client sees "preparing/failed", not a broken page
+On cancel/refund webhook → status=suspended → (grace) → deprovision VPS, free subdomain</code></pre>
+  <p>Must-haves, each a real task: <b>webhook signature verification</b>, <b>idempotency</b> (Dodo retries/duplicates),
+  <b>rollback + alerting</b> when payment succeeds but provisioning fails, and <b>deprovision</b> on cancellation.
+  Provisioning a fresh VPS programmatically needs a provider with a real API (Hetzner/DO/Lightsail are friendlier than
+  Hostinger here) plus a <b>pre-baked image/snapshot</b> of the Diffract stack (or cloud-init running the installer);
+  a <b>warm pool</b> of 1–2 ready VPSs hides the multi-minute spin-up.</p>
+
+  <h2 id="dodo">6. Dodo Payments integration</h2>
+  <p>Standard Merchant-of-Record flow:</p>
+  <ol>
+    <li><b>Checkout</b> — a Dodo product/subscription + hosted payment link (or embedded checkout) on the signup page; collect desired subdomain at/after checkout.</li>
+    <li><b>Webhooks</b> — on payment/subscription <b>active</b> → trigger provisioning (§5); on <b>cancelled/refunded</b> → suspend/deprovision.</li>
+    <li><b>Lifecycle</b> — store <code>subscription_id</code>; reconcile renewals; suspend on dunning failure.</li>
+  </ol>
+  <div class="callout warn">
+    <span class="label">Verify, don't reconstruct</span>
+    Pull the exact <b>event names</b> and the <b>webhook signature scheme</b> from Dodo's current docs at build time — those are
+    the details that silently break. Dodo is an MoR, so it also handles tax/VAT (a plus for a global SaaS).
+  </div>
+
+  <h2 id="auth">7. Auth — a hard prerequisite for go-live <span class="tag">currently missing</span></h2>
+  <div class="callout warn">
+    <span class="label">Blocking</span>
+    Today <code>diffractui</code> has <b>no authentication</b>: <code>/api/deploy</code>,
+    <code>/api/status?…action=destroy</code>, and <code>/api/forward</code> are open and shell out with <code>sudo</code>.
+    The moment <code>client.diffraction.in</code> is public and paid, anyone with the URL controls that tenant's sandbox.
+    Per-tenant login is blocking, not polish (mulch notes already list SSO/RBAC as planned-not-built).
+  </div>
+  <p>Minimum v1: a tenant-scoped login gating the dashboard + all mutating APIs. The agent dashboard already has its own
+  session token; the Diffract control surface does not.</p>
+
+  <h2 id="ui">8. diffractui changes</h2>
+  <ul>
+    <li>VPS-per-client keeps diffractui <b>single-tenant per box</b> → minimal change (it already resolves the one <code>defaultSandbox</code>). Additions: auth (above) + reading its public URL/prefix from env so it emits <code>/client/agent-chat</code> instead of hardcoding <code>/agent</code>.</li>
+    <li><span class="muted">Only if container-per-client is chosen later: diffractui must become tenant-aware — resolve the sandbox from the <code>Host</code> header against the registry on every call. Larger change.</span></li>
+  </ul>
+
+  <h2 id="rollout">9. Phased rollout (suggested order)</h2>
+  <ol>
+    <li><b>Domain cutover</b> — wildcard <code>*.diffraction.in</code> + ingress + wildcard TLS; move the existing client off <code>*.hstgr.cloud</code>. <span class="muted">(Low risk, immediate value.)</span></li>
+    <li><b>Tenant DB + ingress lookup</b> — subdomain → backend.</li>
+    <li><b>Auth on diffractui</b> — gate before anything is public/paid.</li>
+    <li><b>Provisioning automation</b> — VPS API + cloud-init + health checks + rollback (manual trigger first).</li>
+    <li><b>Dodo integration</b> — checkout + webhooks wired to the provisioner; deprovision on cancel.</li>
+    <li><b>Polish</b> — warm pool, billing portal, suspension/grace, observability.</li>
+  </ol>
+
+  <h2 id="open">10. Decisions needed</h2>
+  <ol>
+    <li><b>Isolation:</b> confirm VPS-per-client (rec) vs container-per-client.</li>
+    <li><b>Inference billing:</b> confirm BYO-key (rec) vs Diffract-metered.</li>
+    <li><b>DNS control for <code>diffraction.in</code>:</b> which provider, and do we have API access? (gates automation)</li>
+    <li><b>VPS provider for client backends:</b> stay on Hostinger, or move to one with a solid provisioning API (Hetzner/DO/Lightsail)?</li>
+    <li><b><code>/client/</code> path segment:</b> literal, or the tenant name?</li>
+  </ol>
+
+  <footer class="doc">
+    Diffract multi-tenant + payments plan · design only, no code changes · revisit later.
+    Routing (§3) is a generalization of the <code>/</code> + <code>/agent</code> split already built and verified;
+    the genuinely new work is payments, provisioning automation, the tenant registry, auth, and DNS/TLS automation.
+  </footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Diffract — Enterprise Readiness &amp; Hardening Roadmap</title>
+<style>
+  :root {
+    --bg:#0f1115; --surface:#171a21; --surface-2:#1e222b; --border:#2a2f3a;
+    --text:#e6e8ec; --muted:#9aa3b2; --accent:#FFBF00; --green:#34d399;
+    --red:#f87171; --amber:#fbbf24; --blue:#60a5fa; --code-bg:#11141a;
+  }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:960px; margin:0 auto; padding:48px 24px 96px; }
+  header.doc { border-bottom:1px solid var(--border); padding-bottom:24px; margin-bottom:32px; }
+  h1 { font-size:30px; line-height:1.2; margin:0 0 8px; }
+  h1 .sub { color:var(--accent); }
+  .meta { color:var(--muted); font-size:14px; }
+  .meta b { color:var(--text); font-weight:600; }
+  h2 { font-size:22px; margin:44px 0 12px; padding-top:8px; border-top:1px solid var(--border); }
+  h2:first-of-type { border-top:none; }
+  h3 { font-size:17px; margin:24px 0 8px; color:#fff; }
+  p { margin:10px 0; }
+  a { color:var(--blue); }
+  ul,ol { margin:10px 0; padding-left:22px; }
+  li { margin:5px 0; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px;
+    background:var(--code-bg); border:1px solid var(--border); border-radius:5px; padding:1px 6px; }
+  table { width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;
+    background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+  th,td { text-align:left; padding:10px 14px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th { background:var(--surface-2); color:#fff; font-weight:600; }
+  tr:last-child td { border-bottom:none; }
+  .callout { border:1px solid var(--border); border-left:4px solid var(--accent);
+    background:var(--surface); border-radius:8px; padding:14px 18px; margin:16px 0; }
+  .callout.rec { border-left-color:var(--green); }
+  .callout.warn { border-left-color:var(--red); }
+  .callout .label { display:inline-block; font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+    font-weight:700; color:var(--accent); margin-bottom:4px; }
+  .callout.rec .label { color:var(--green); } .callout.warn .label { color:var(--red); }
+  .phase { background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:4px 22px 18px; margin:18px 0; }
+  .phase h3 { display:flex; align-items:center; gap:10px; }
+  .pnum { display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px;
+    border-radius:8px; background:var(--surface-2); border:1px solid var(--border);
+    font-size:14px; font-weight:700; color:var(--accent); }
+  .exit { font-size:13.5px; color:var(--muted); border-top:1px dashed var(--border); margin-top:12px; padding-top:10px; }
+  .exit b { color:var(--green); }
+  .sev { display:inline-block; font-size:11px; font-weight:700; padding:1px 8px; border-radius:999px; }
+  .sev.block { background:rgba(248,113,113,.13); color:var(--red); border:1px solid rgba(248,113,113,.3); }
+  .sev.major { background:rgba(251,191,36,.12); color:var(--amber); border:1px solid rgba(251,191,36,.3); }
+  .sev.later { background:rgba(96,165,250,.12); color:var(--blue); border:1px solid rgba(96,165,250,.3); }
+  .tag { display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px;
+    background:rgba(255,191,0,.12); color:var(--accent); border:1px solid rgba(255,191,0,.3); margin-left:8px; }
+  .timeline { font-size:13px; color:var(--muted); }
+  .toc { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px 20px; margin:24px 0; }
+  .toc a { color:var(--text); text-decoration:none; } .toc a:hover { color:var(--accent); }
+  .muted { color:var(--muted); }
+  .ck { list-style:none; padding-left:0; } .ck li::before { content:"☐ "; color:var(--accent); }
+  footer.doc { margin-top:48px; padding-top:16px; border-top:1px solid var(--border); color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="doc">
+    <h1>Diffract — <span class="sub">Enterprise Readiness &amp; Hardening</span> roadmap</h1>
+    <p class="meta">
+      <b>Status:</b> Draft / plan only (no code changes) &nbsp;•&nbsp;
+      <b>Created:</b> 2026-06-03 &nbsp;•&nbsp;
+      <b>Current maturity:</b> ~2/5 — solid agent core, prototype/demo shell &nbsp;•&nbsp;
+      <b>Companion:</b> <code>diffract-multitenant-payments-plan.html</code>
+    </p>
+  </header>
+
+  <div class="callout">
+    <span class="label">Where we are</span>
+    The <b>agent runtime</b> (OpenShell / NemoClaw / Hermes) is strong on isolation — egress allowlisting, secrets-not-in-box,
+    Landlock FS, config integrity. The <b>Diffract productization layer</b> (<code>diffractui</code> + <code>setup.sh</code> + ops)
+    is demo-grade: <b>no auth</b>, the API key is passed in a <b>URL query param</b>, services shell out with <code>sudo</code> /
+    <code>shell:true</code>, <b>no tests / CI / monitoring</b>, single-VPS, manual prod edits. This session, the headline feature
+    (web-UI agent chat) was fully broken and fixed only by hand-patching prod — a fair barometer of current operational maturity.
+  </div>
+
+  <div class="callout rec">
+    <span class="label">Approach</span>
+    Two interleaved tracks: <b>(A) Harden &amp; productionize what exists</b>, and <b>(B) build the SaaS / multi-tenant / payments
+    layer</b> (detailed in the companion architecture doc). Sequenced into 5 phases, each gated by the milestone it unlocks —
+    so we never expose a paid/public surface before the controls that protect it exist, and never build the 500-tenant version
+    before client #2.
+  </div>
+
+  <nav class="toc">
+    <b>Roadmap</b>
+    <ol>
+      <li><a href="#principles">Guiding principles</a></li>
+      <li><a href="#p0">Phase 0 — Stop the bleeding</a> <span class="sev block">blocking</span></li>
+      <li><a href="#p1">Phase 1 — Pilot-ready</a></li>
+      <li><a href="#p2">Phase 2 — Multi-tenant foundation</a></li>
+      <li><a href="#p3">Phase 3 — Monetization + provisioning</a></li>
+      <li><a href="#p4">Phase 4 — Enterprise GA</a></li>
+      <li><a href="#xc">Cross-cutting workstreams</a></li>
+      <li><a href="#dod">Definition of enterprise-ready</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="principles">Guiding principles</h2>
+  <ul>
+    <li><b>Security before exposure</b> — no public or paid URL until auth + secret hygiene exist.</li>
+    <li><b>Automate before scale</b> — no more hand-edits on prod; provisioning must be reproducible and health-checked.</li>
+    <li><b>Defense in depth</b> — keep OpenShell's agent governance; add layers, don't replace them.</li>
+    <li><b>Right-size to client count</b> — build the minimal safe version for the next client, not for 500.</li>
+    <li><b>Make outages page you, not the customer</b> — observability is a feature.</li>
+  </ul>
+
+  <h2>Phased roadmap</h2>
+
+  <div class="phase" id="p0">
+    <h3><span class="pnum">0</span> Stop the bleeding <span class="sev block">blocking for ANY external user</span> <span class="timeline">· ~days</span></h3>
+    <p class="muted">These are non-negotiable before anyone outside your team touches a URL — paid or not.</p>
+    <ul>
+      <li><b>Auth on <code>diffractui</code></b> — gate every page + all mutating APIs (<code>/api/deploy</code>, <code>destroy</code>, <code>/api/forward</code>). Minimal now: one admin login / signed session. Per-tenant auth comes in Phase 2.</li>
+      <li><b>Get the API key out of the URL</b> — it's currently <code>searchParams.get("apiKey")</code> on a GET (lands in access logs, proxies, history). Move to a POST body, pass to <code>onboard</code> via env/stdin only, never log it.</li>
+      <li><b>De-privilege the shell-outs</b> — replace <code>shell:true</code> string interpolation and <code>sudo systemctl restart</code> with a constrained helper (fixed command allowlist / polkit rule) and validate inputs (sandbox name, provider) against a strict pattern. Today this is a command-injection + privilege-escalation surface.</li>
+      <li><b>Uptime + health alerting</b> — a check that asserts dashboard:9119 (chat WS = 101), agent API:8642 <code>/health</code>, and diffractui:3000, and pages you on failure. (This is exactly the outage we hit this session.)</li>
+      <li><b>Fix latent bugs</b> — <code>gateway-token</code> reads the wrong <code>/sandbox/.openclaw/…</code> path on a Hermes box; audit similar OpenClaw/Hermes mismatches.</li>
+    </ul>
+    <div class="exit"><b>Exit:</b> no unauthenticated control surface; no secret in a URL; no unconstrained <code>sudo</code>; you get paged before a customer notices an outage.</div>
+  </div>
+
+  <div class="phase" id="p1">
+    <h3><span class="pnum">1</span> Pilot-ready <span class="timeline">· single tenant, design partners · ~weeks</span></h3>
+    <ul>
+      <li><b>CI/CD for <code>diffractui</code></b> — lint + typecheck + a smoke test; deploy via pipeline, not by editing files on the box.</li>
+      <li><b>Reproducible, idempotent provisioning</b> — replace the fragile <code>setup.sh</code> + systemd + socat dance with a health-checked install where the dashboard-with-<code>--tui</code> launch (this session's fix) is baked in, plus a <b>post-deploy smoke test</b> that asserts a real agent round-trip (WS 101 + a "PONG").</li>
+      <li><b>Secrets at rest</b> — provider keys/tokens into a secret store; correct file perms; restricted access. (Vault/KMS can wait, but stop leaving keys loose.)</li>
+      <li><b>Structured logging + error tracking</b> — Sentry/OTel; centralized logs for diffractui, gateway, dashboard.</li>
+      <li><b>Backups + documented restore</b> of config/state.</li>
+    </ul>
+    <div class="exit"><b>Exit:</b> a new environment can be stood up and verified automatically; failures are observable; a friendly customer can self-serve safely.</div>
+  </div>
+
+  <div class="phase" id="p2">
+    <h3><span class="pnum">2</span> Multi-tenant foundation <span class="tag">see architecture doc</span> <span class="timeline">· ~weeks–months</span></h3>
+    <ul>
+      <li><b>Tenant DB</b> as source of truth (not <code>sandboxes.json</code>) — subdomain, status, backend, owner.</li>
+      <li><b>Server-enforced per-tenant authorization</b> — every API call verifies the caller owns the sandbox it touches. (On shared infra this is load-bearing security, not polish.)</li>
+      <li><b>Tenant-aware <code>diffractui</code></b> — resolve sandbox from the subdomain; emit the agent under the chosen path prefix.</li>
+      <li><b>Central ingress</b> — wildcard <code>*.diffraction.in</code> + DNS-01 wildcard TLS; retire the hardcoded <code>*.hstgr.cloud</code> host.</li>
+      <li><b>RBAC roles</b> (Viewer / Operator / Admin / Security / Billing) + <b>SSO / OIDC</b> (Okta, Azure AD, Google) — enterprise table stakes.</li>
+    </ul>
+    <div class="exit"><b>Exit:</b> multiple isolated tenants on <code>tenant.diffraction.in</code>, each access-controlled; SSO works.</div>
+  </div>
+
+  <div class="phase" id="p3">
+    <h3><span class="pnum">3</span> Monetization + automated provisioning <span class="tag">see architecture doc</span> <span class="timeline">· ~months</span></h3>
+    <ul>
+      <li><b>Dodo Payments</b> — checkout → signed, <b>idempotent</b> webhook → provisioner → tenant registry → routing; deprovision on cancel/refund.</li>
+      <li><b>Central LiteLLM inference plane</b> — since Diffract owns the key: per-tenant virtual keys with <b>fail-closed budgets</b>, rate limits, and model allowlists; real upstream key kept off the client hosts. (The spend cap is live from client #1.)</li>
+      <li><b>Usage metering</b> → billing reconciliation + quota enforcement + anomaly alerts.</li>
+    </ul>
+    <div class="exit"><b>Exit:</b> a client can pay and get a working, cost-capped environment with no manual steps; cancellation tears it down.</div>
+  </div>
+
+  <div class="phase" id="p4">
+    <h3><span class="pnum">4</span> Enterprise GA — compliance, resilience, scale <span class="timeline">· ~months</span></h3>
+    <ul>
+      <li><b>Audit logging</b> — immutable, per-tenant action trail + audit UI (procurement requirement).</li>
+      <li><b>Compliance</b> — SOC 2 Type II posture, third-party pentest, data-residency story; document the OpenShell control mapping (egress / FS / secrets / config).</li>
+      <li><b>HA / no SPOF</b> — redundant control plane + ingress; multi-host sandbox pool with placement/scheduling; warm pool for fast provisioning.</li>
+      <li><b>DR + operations</b> — RTO/RPO targets, restore drills, on-call, status page, SLAs.</li>
+      <li><b>Dependency-maturity gate</b> — NemoClaw is <i>alpha</i> ("not production-ready" per NVIDIA). Track its path to stable; pin versions; have a fork/patch strategy and an upstream-risk plan.</li>
+      <li><b>Legal / branding</b> — review the rebrand of NVIDIA (Apache-2.0) + Nous (MIT) forks: attribution, trademark, and the "OpenClaw / OpenShell / NemoClaw" renames before commercial sale.</li>
+    </ul>
+    <div class="exit"><b>Exit:</b> survives an enterprise security review, an availability commitment, and a procurement/legal review.</div>
+  </div>
+
+  <h2 id="xc">Cross-cutting workstreams (run continuously, not as a phase)</h2>
+  <table>
+    <tr><th>Workstream</th><th>From phase</th><th>What "done enough" looks like</th></tr>
+    <tr><td><b>Security</b></td><td>0</td><td>auth, secret hygiene, de-privileged ops → pentest-clean by P4</td></tr>
+    <tr><td><b>Observability</b></td><td>0→1</td><td>health alerting → full logs/metrics/traces + dashboards</td></tr>
+    <tr><td><b>Testing / CI</b></td><td>1</td><td>smoke tests → integration + deploy gates</td></tr>
+    <tr><td><b>Docs &amp; runbooks</b></td><td>1</td><td>provisioning + incident runbooks → customer + ops docs</td></tr>
+    <tr><td><b>Upstream tracking</b></td><td>0</td><td>pin/monitor NemoClaw &amp; Hermes; absorb security patches</td></tr>
+  </table>
+
+  <h2 id="dod">Definition of "enterprise-ready" (the GA gate)</h2>
+  <ul class="ck">
+    <li>SSO/OIDC + RBAC; every mutating action authenticated &amp; authorized per tenant</li>
+    <li>No secret ever in a URL/log; secrets in a managed store; key never on client compute</li>
+    <li>Tenant isolation validated (data + compute + credentials), backed by OpenShell governance</li>
+    <li>Immutable per-tenant audit log + exportable trail</li>
+    <li>Automated, idempotent provisioning + deprovisioning with post-deploy verification</li>
+    <li>Fail-closed per-tenant spend caps + rate limits (Diffract-owned key)</li>
+    <li>Monitoring/alerting/on-call; documented SLA, status page, DR with tested restore</li>
+    <li>No single point of failure for control plane + ingress</li>
+    <li>CI gates on every change; zero manual prod edits</li>
+    <li>SOC 2 posture + pentest; licensing/trademark cleared</li>
+    <li>Dependency-maturity risk owned (NemoClaw alpha → pinned/forked/tracked)</li>
+  </ul>
+
+  <div class="callout warn">
+    <span class="label">Honest timeline</span>
+    Phase 0 is days; Phase 1 is weeks; Phases 2–4 are a multi-month, multi-workstream effort — and "enterprise-stable" is
+    <i>partly gated on upstream you don't fully control</i> (NemoClaw alpha). Treat P0/P1 as the immediate, fully-in-your-control
+    work that de-risks everything else.
+  </div>
+
+  <footer class="doc">
+    Diffract enterprise-readiness &amp; hardening roadmap · plan only, no code changes.
+    Pairs with <code>diffract-multitenant-payments-plan.html</code> (Phases 2–3 reference it).
+    Start at Phase 0 — auth + getting the API key out of the URL are the two things blocking any external user today.
+  </footer>
+
+</div>
+</body>
+</html>
