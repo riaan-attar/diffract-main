@@ -1,9 +1,22 @@
 export const dynamic = "force-dynamic";
 import { spawn } from "child_process";
+import { cookies } from "next/headers";
+import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 
 const DIFFRACT = process.env.DIFFRACT_PATH || "nemoclaw";
 
+// Defense-in-depth: re-verify the admin session inside the handler, not just
+// in proxy.ts (the Next docs warn a matcher change can silently drop coverage).
+async function requireSession(): Promise<Response | null> {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  if (await verifySessionToken(token)) return null;
+  return Response.json({ error: "Unauthorized" }, { status: 401 });
+}
+
 export async function GET(request: Request) {
+  const denied = await requireSession();
+  if (denied) return denied;
+
   const { searchParams } = new URL(request.url);
 
   const provider = searchParams.get("provider") || "nvidia";
@@ -141,6 +154,9 @@ export async function GET(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const denied = await requireSession();
+  if (denied) return denied;
+
   const { searchParams } = new URL(request.url);
   const sandbox = searchParams.get("sandbox");
 

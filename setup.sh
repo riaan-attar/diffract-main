@@ -237,6 +237,27 @@ if [ "$USE_VPS" = true ]; then
     NODE_PATH=$(which node || echo "/usr/bin/node")
     NPM_PATH=$(which npm || echo "/usr/bin/npm")
 
+    # Admin auth secrets for the Diffract UI (Phase-0 readiness: no
+    # unauthenticated control surface). Stored in a 0600 EnvironmentFile so they
+    # are NOT exposed in the world-readable systemd unit. Generated once and
+    # reused on re-runs so the admin password stays stable; pass
+    # DIFFRACT_ADMIN_PASSWORD in the environment to set your own.
+    DIFFRACT_ENV_FILE=/etc/diffractui.env
+    if [ -f "$DIFFRACT_ENV_FILE" ]; then
+        print_warning "Reusing existing admin auth secrets at $DIFFRACT_ENV_FILE"
+        # shellcheck disable=SC1090
+        . "$DIFFRACT_ENV_FILE"
+    fi
+    DIFFRACT_AUTH_SECRET="${DIFFRACT_AUTH_SECRET:-$(openssl rand -hex 32)}"
+    DIFFRACT_ADMIN_PASSWORD="${DIFFRACT_ADMIN_PASSWORD:-$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | head -c 20)}"
+    umask 077
+    cat <<EOF > "$DIFFRACT_ENV_FILE"
+DIFFRACT_AUTH_SECRET=$DIFFRACT_AUTH_SECRET
+DIFFRACT_ADMIN_PASSWORD=$DIFFRACT_ADMIN_PASSWORD
+EOF
+    chmod 600 "$DIFFRACT_ENV_FILE"
+    umask 022
+
     cat <<EOF > /etc/systemd/system/diffractui.service
 [Unit]
 Description=Diffract Next.js Web UI Server
@@ -250,6 +271,7 @@ Environment=PATH=$PATH
 Environment=PORT=3000
 Environment=NODE_ENV=production
 Environment=DIFFRACT_PATH=$(which nemoclaw || echo "nemoclaw")
+EnvironmentFile=$DIFFRACT_ENV_FILE
 ExecStart=$NPM_PATH run start
 Restart=always
 RestartSec=5
@@ -424,6 +446,11 @@ if [ "$USE_VPS" = true ]; then
     else
         echo -e "Access secure interface: ${BLUE}http://<your-vps-ip>${NC}"
     fi
+    echo -e "\n${YELLOW}── Admin login (Diffract UI is now password-protected) ──${NC}"
+    echo -e "  Username:  (none — password only)"
+    echo -e "  Password:  ${GREEN}${DIFFRACT_ADMIN_PASSWORD}${NC}"
+    echo -e "  Stored at: ${DIFFRACT_ENV_FILE} (root-only, 0600)"
+    echo -e "  ${YELLOW}Save this now. To change it: edit ${DIFFRACT_ENV_FILE} and 'systemctl restart diffractui'.${NC}"
 else
     echo -e "${GREEN}Local NemoClaw CLI setup succeeded!${NC}"
     echo "Run 'nemoclaw onboard' to configure your environment."
