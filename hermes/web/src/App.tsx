@@ -12,17 +12,14 @@ import {
   NavLink,
   Navigate,
   useLocation,
-  useNavigate,
 } from "react-router-dom";
 import {
   Activity,
   BarChart3,
-  BookOpen,
   Clock,
   Code,
   Cpu,
   Database,
-  Download,
   Eye,
   FileText,
   Globe,
@@ -32,7 +29,6 @@ import {
   MessageSquare,
   Package,
   Puzzle,
-  RotateCw,
   Settings,
   Shield,
   Sparkles,
@@ -44,19 +40,14 @@ import {
   Zap,
 } from "lucide-react";
 import { Button } from "@nous-research/ui/ui/components/button";
-import { ListItem } from "@nous-research/ui/ui/components/list-item";
 import { SelectionSwitcher } from "@nous-research/ui/ui/components/selection-switcher";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Typography } from "@/components/NouiTypography";
 import { cn } from "@/lib/utils";
 import { Backdrop } from "@/components/Backdrop";
-import { SidebarFooter } from "@/components/SidebarFooter";
 import { SidebarStatusStrip } from "@/components/SidebarStatusStrip";
 import { PageHeaderProvider } from "@/contexts/PageHeaderProvider";
-import { useSystemActions } from "@/contexts/useSystemActions";
-import type { SystemAction } from "@/contexts/system-actions-context";
 import ConfigPage from "@/pages/ConfigPage";
-import DocsPage from "@/pages/DocsPage";
 import EnvPage from "@/pages/EnvPage";
 import SessionsPage from "@/pages/SessionsPage";
 import LogsPage from "@/pages/LogsPage";
@@ -117,7 +108,6 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/profiles": ProfilesPage,
   "/config": ConfigPage,
   "/env": EnvPage,
-  "/docs": DocsPage,
 };
 
 // Route placeholder for /chat.  The persistent ChatPage host (rendered
@@ -154,12 +144,6 @@ const BUILTIN_NAV_REST: NavItem[] = [
   { path: "/profiles", labelKey: "profiles", label: "Profiles", icon: Users },
   { path: "/config", labelKey: "config", label: "Config", icon: Settings },
   { path: "/env", labelKey: "keys", label: "Keys", icon: KeyRound },
-  {
-    path: "/docs",
-    labelKey: "documentation",
-    label: "Documentation",
-    icon: BookOpen,
-  },
 ];
 
 const ICON_MAP: Record<string, ComponentType<{ className?: string }>> = {
@@ -312,7 +296,6 @@ export default function App() {
   const { theme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const closeMobile = useCallback(() => setMobileOpen(false), []);
-  const isDocsRoute = pathname === "/docs" || pathname === "/docs/";
   const normalizedPath = pathname.replace(/\/$/, "") || "/";
   const isChatRoute = normalizedPath === "/chat";
   const embeddedChat = isDashboardEmbeddedChatEnabled();
@@ -505,9 +488,7 @@ export default function App() {
                   className="font-bold text-[1.125rem] leading-[0.95] tracking-[0.0525rem] text-midground uppercase"
                   style={{ mixBlendMode: "plus-lighter" }}
                 >
-                  Hermes
-                  <br />
-                  Agent
+                  Diffract
                 </Typography>
               </div>
 
@@ -582,8 +563,6 @@ export default function App() {
                 <LanguageSwitcher dropUp />
               </div>
             </div>
-
-            <SidebarFooter />
           </aside>
 
           <PageHeaderProvider pluginTabs={pluginTabMeta}>
@@ -594,7 +573,6 @@ export default function App() {
                 isChatRoute
                   ? "pb-0 pt-1 sm:pt-2 lg:pt-4"
                   : "pt-2 sm:pt-4 lg:pt-6",
-                isDocsRoute && "min-h-0 flex-1",
               )}
             >
               <PluginSlot name="pre-main" />
@@ -603,7 +581,7 @@ export default function App() {
                   "w-full min-w-0",
                   !isChatRoute &&
                     "pb-[calc(2rem+env(safe-area-inset-bottom,0px))] lg:pb-8",
-                  (isDocsRoute || isChatRoute) &&
+                  isChatRoute &&
                     "min-h-0 flex flex-1 flex-col",
                 )}
               >
@@ -711,35 +689,8 @@ function SidebarNavLink({ closeMobile, item, t }: SidebarNavLinkProps) {
   );
 }
 
-function SidebarSystemActions({ onNavigate }: { onNavigate: () => void }) {
+function SidebarSystemActions(_props: { onNavigate: () => void }) {
   const { t } = useI18n();
-  const navigate = useNavigate();
-  const { activeAction, isBusy, isRunning, pendingAction, runAction } =
-    useSystemActions();
-
-  const items: SystemActionItem[] = [
-    {
-      action: "restart",
-      icon: RotateCw,
-      label: t.status.restartGateway,
-      runningLabel: t.status.restartingGateway,
-      spin: true,
-    },
-    {
-      action: "update",
-      icon: Download,
-      label: t.status.updateHermes,
-      runningLabel: t.status.updatingHermes,
-      spin: false,
-    },
-  ];
-
-  const handleClick = (action: SystemAction) => {
-    if (isBusy) return;
-    void runAction(action);
-    navigate("/sessions");
-    onNavigate();
-  };
 
   return (
     <div
@@ -759,65 +710,6 @@ function SidebarSystemActions({ onNavigate }: { onNavigate: () => void }) {
       </span>
 
       <SidebarStatusStrip />
-
-      <ul className="flex flex-col">
-        {items.map(({ action, icon: Icon, label, runningLabel, spin }) => {
-          const isPending = pendingAction === action;
-          const isActionRunning =
-            activeAction === action && isRunning && !isPending;
-          const busy = isPending || isActionRunning;
-          const displayLabel = isActionRunning ? runningLabel : label;
-          const disabled = isBusy && !busy;
-
-          return (
-            <li key={action}>
-              <ListItem
-                onClick={() => handleClick(action)}
-                disabled={disabled}
-                aria-busy={busy}
-                active={busy}
-                className={cn(
-                  "gap-3 px-5 py-1.5 whitespace-nowrap",
-                  "font-mondwest text-display text-xs tracking-[0.1em]",
-                  "transition-colors",
-                  busy
-                    ? "text-midground"
-                    : "text-text-secondary hover:text-midground",
-                  "disabled:text-text-disabled",
-                )}
-              >
-                {isPending ? (
-                  <Spinner className="shrink-0 text-[0.875rem]" />
-                ) : isActionRunning && spin ? (
-                  <Spinner className="shrink-0 text-[0.875rem]" />
-                ) : (
-                  <Icon
-                    className={cn(
-                      "h-3.5 w-3.5 shrink-0",
-                      isActionRunning && !spin && "animate-pulse",
-                    )}
-                  />
-                )}
-
-                <span className="truncate">{displayLabel}</span>
-
-                <span
-                  aria-hidden
-                  className="absolute inset-y-0.5 left-1.5 right-1.5 bg-midground opacity-0 pointer-events-none transition-opacity duration-200 group-hover:opacity-5"
-                />
-
-                {busy && (
-                  <span
-                    aria-hidden
-                    className="absolute left-0 top-0 bottom-0 w-px bg-midground"
-                    style={{ mixBlendMode: "plus-lighter" }}
-                  />
-                )}
-              </ListItem>
-            </li>
-          );
-        })}
-      </ul>
     </div>
   );
 }
@@ -833,12 +725,4 @@ interface SidebarNavLinkProps {
   closeMobile: () => void;
   item: NavItem;
   t: Translations;
-}
-
-interface SystemActionItem {
-  action: SystemAction;
-  icon: ComponentType<{ className?: string }>;
-  label: string;
-  runningLabel: string;
-  spin: boolean;
 }

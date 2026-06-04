@@ -78,7 +78,15 @@ except ImportError:
 WEB_DIST = Path(os.environ["HERMES_WEB_DIST"]) if "HERMES_WEB_DIST" in os.environ else Path(__file__).parent / "web_dist"
 _log = logging.getLogger(__name__)
 
-app = FastAPI(title="Hermes Agent", version=__version__)
+# docs_url/redoc_url/openapi_url disabled: the dashboard does not expose the
+# FastAPI Swagger ("/docs") or ReDoc ("/redoc") interactive API pages.
+app = FastAPI(
+    title="Hermes Agent",
+    version=__version__,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
 # ---------------------------------------------------------------------------
 # Session token for protecting sensitive endpoints (reveal).

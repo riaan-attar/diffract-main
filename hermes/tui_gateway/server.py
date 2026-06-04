@@ -1476,14 +1476,10 @@ def _session_info(agent) -> dict:
         info["system_prompt"] = getattr(agent, "_cached_system_prompt", "") or ""
     except Exception:
         pass
-    try:
-        from hermes_cli.banner import get_update_result
-        from hermes_cli.config import recommended_update_command
-
-        info["update_behind"] = get_update_result(timeout=0.5)
-        info["update_command"] = recommended_update_command()
-    except Exception:
-        pass
+    # Update-available notice intentionally disabled for Diffract branding —
+    # the TUI banner never shows the "N commits behind / run update" line.
+    info["update_behind"] = None
+    info["update_command"] = ""
     return info
 
 

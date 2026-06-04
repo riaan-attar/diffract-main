@@ -44,9 +44,9 @@ export function ArtLines({ lines }: { lines: [string, string][] }) {
 // Terminals can't scale glyphs, so "responsive" means picking a layout that
 // fits the available columns. Thresholds are picked so each tier reads
 // comfortably without forcing wrap or truncation drift on box-drawing edges.
-const TAG_FULL = 'Nous Research · Messenger of the Digital Gods'
-const TAG_MID = 'Messenger of the Digital Gods'
-const TAG_TINY = 'Nous Research'
+const TAG_FULL = 'Diffract · Secure AI Agent'
+const TAG_MID = 'Secure AI Agent'
+const TAG_TINY = 'Diffract'
 const HIDE_BELOW = 34
 const COMPACT_FROM = 58
 
@@ -281,20 +281,17 @@ export function SessionPanel({ info, maxWidth, sid, t }: SessionPanelProps) {
     <Box borderColor={t.color.border} borderStyle="round" marginBottom={1} paddingX={2} paddingY={1}>
       {wide && (
         <Box flexDirection="column" marginRight={2} width={leftW}>
-          <ArtLines lines={heroLines} />
-          <Text />
-
-          <Text color={t.color.accent}>
+          <Text color={t.color.accent} wrap="truncate-end">
             {info.model.split('/').pop()}
-            <Text color={t.color.muted}> · Nous Research</Text>
           </Text>
-
+          <Text color={t.color.muted} wrap="truncate-end">
+            Diffract
+          </Text>
           <Text color={t.color.muted} wrap="truncate-end">
             {info.cwd || process.cwd()}
           </Text>
-
           {sid && (
-            <Text>
+            <Text wrap="truncate-end">
               <Text color={t.color.sessionLabel}>Session: </Text>
               <Text color={t.color.sessionBorder}>{sid}</Text>
             </Text>
@@ -303,21 +300,13 @@ export function SessionPanel({ info, maxWidth, sid, t }: SessionPanelProps) {
       )}
 
       <Box flexDirection="column" width={w}>
-        {wide ? (
-          <Box justifyContent="center" marginBottom={1}>
-            <Text bold color={t.color.primary}>
-              {t.brand.name}
-              {info.version ? ` v${info.version}` : ''}
-              {info.release_date ? ` (${info.release_date})` : ''}
-            </Text>
-          </Box>
-        ) : (
+        {!wide && (
           // Narrow layout hides the hero column; surface model/cwd/session
           // here so they aren't lost.
           <Box flexDirection="column" marginBottom={1}>
             <Text color={t.color.accent} wrap="truncate-end">
               {info.model.split('/').pop()}
-              <Text color={t.color.muted}> · Nous Research</Text>
+              <Text color={t.color.muted}> · Diffract</Text>
             </Text>
             <Text color={t.color.muted} wrap="truncate-end">
               {info.cwd || process.cwd()}
