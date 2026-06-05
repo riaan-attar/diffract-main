@@ -29,6 +29,78 @@ print_warning() {
     echo -e "${YELLOW}⚠ $1${NC}"
 }
 
+# Locate the installed Hermes source checkout (a directory containing the
+# hermes_cli/ and ui-tui/ source). Echoes the path on success, returns 1 if
+# none is found. Override with HERMES_AGENT_DIR=/path/to/hermes-agent.
+resolve_hermes_dir() {
+    local candidates=(
+        "$HERMES_AGENT_DIR"
+        "/usr/local/lib/hermes-agent"
+        "$HOME/.hermes/hermes-agent"
+        "/root/.hermes/hermes-agent"
+    )
+    local d
+    for d in "${candidates[@]}"; do
+        if [ -n "$d" ] && [ -d "$d/hermes_cli" ] && [ -d "$d/ui-tui" ]; then
+            echo "$d"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Overlay the local custom Hermes branding (web dashboard, TUI, and Python
+# banners) onto the installed Hermes, then rebuild the TUI bundle and web UI.
+# Runs in both local and VPS modes so every branding edit survives a reinstall.
+apply_diffract_branding() {
+    print_header "Applying Diffract Branding to Installed Hermes"
+
+    local SRC="$PROJECT_ROOT/hermes"
+    if [ ! -d "$SRC" ]; then
+        print_warning "Local hermes source not found at $SRC — skipping branding overlay."
+        return 0
+    fi
+
+    local DEST
+    DEST=$(resolve_hermes_dir) || {
+        print_warning "Installed Hermes not found (looked in /usr/local/lib/hermes-agent and ~/.hermes/hermes-agent)."
+        print_warning "Install Hermes first, then re-run — or set HERMES_AGENT_DIR=/path/to/hermes-agent."
+        return 0
+    }
+    print_success "Found installed Hermes at: $DEST"
+
+    # 1. TUI source (DIFFRACT banner, branding panel, theme/brand name, …)
+    print_warning "Syncing custom TUI source (ui-tui/src)..."
+    cp -a "$SRC/ui-tui/src/." "$DEST/ui-tui/src/"
+
+    # 2. Python branding (welcome banner, TUI gateway info, web server /docs)
+    print_warning "Syncing custom Python files..."
+    cp -f "$SRC/hermes_cli/banner.py"     "$DEST/hermes_cli/banner.py"
+    cp -f "$SRC/hermes_cli/web_server.py" "$DEST/hermes_cli/web_server.py"
+    cp -f "$SRC/tui_gateway/server.py"    "$DEST/tui_gateway/server.py"
+
+    # 3. Web dashboard source (sidebar branding, removed nav/footer, …).
+    #    Copy only src/ so the install's own package.json + node_modules
+    #    (built for this OS) are left intact.
+    print_warning "Syncing custom web dashboard source (web/src)..."
+    cp -a "$SRC/web/src/." "$DEST/web/src/"
+
+    # 4. Force a fresh TUI bundle. We build explicitly rather than relying on
+    #    Hermes' auto-rebuild, because cp -a preserves mtimes and the
+    #    "is dist stale?" check can otherwise skip the rebuild.
+    print_warning "Rebuilding TUI bundle (ui-tui)..."
+    ( cd "$DEST/ui-tui" && npm install && npm run build )
+    print_success "TUI bundle rebuilt"
+
+    # 5. Rebuild the web dashboard (vite outputs to ../hermes_cli/web_dist,
+    #    which is what the dashboard server and port-forwarder serve).
+    print_warning "Rebuilding web dashboard (web)..."
+    ( cd "$DEST/web" && npm install && npm run build )
+    print_success "Web dashboard rebuilt"
+
+    print_success "Diffract branding applied to $DEST"
+}
+
 # Parse arguments
 USE_VPS=false
 DOMAIN=""
@@ -202,6 +274,10 @@ NEMOHERMES_GLOBAL_PATH=$(which nemohermes 2>/dev/null || true)
 cd "$PROJECT_ROOT"
 print_success "NemoClaw CLI installed globally"
 
+# Step 6: Overlay custom Diffract branding onto the installed Hermes and
+# rebuild (web + TUI + Python). Runs in both local and VPS modes.
+apply_diffract_branding
+
 # ----------------- VPS-ONLY DEPLOYMENT STEPS -----------------
 if [ "$USE_VPS" = true ]; then
     print_header "VPS Mode: Deploying Web UI and Reverse Proxy"
@@ -219,18 +295,9 @@ if [ "$USE_VPS" = true ]; then
     npm run build
     print_success "UI built successfully"
 
-    # Sync and build Hermes UI
-    print_warning "Syncing and Building custom Hermes UI..."
-    HERMES_UI_DIR="$PROJECT_ROOT/hermes/web"
-    if [ -d "$HERMES_UI_DIR" ] && [ -d "/usr/local/lib/hermes-agent/web" ]; then
-        cp -a "$HERMES_UI_DIR/." /usr/local/lib/hermes-agent/web/
-        cd /usr/local/lib/hermes-agent/web
-        npm install
-        npm run build
-        print_success "Hermes UI custom built successfully"
-    else
-        print_warning "Skipping custom Hermes UI build (not found)"
-    fi
+    # NOTE: The custom Hermes web UI + TUI + Python branding are applied and
+    # rebuilt earlier by apply_diffract_branding (Step 6), so there is no
+    # separate Hermes UI build step here.
 
     # Create & start systemd diffractui service
     print_warning "Configuring Systemd services..."
