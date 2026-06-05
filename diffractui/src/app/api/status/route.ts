@@ -103,13 +103,20 @@ function streamLogs(sandbox: string) {
   let closed = false;
 
   function stop() {
-    if (proc) {
+    const p = proc;
+    proc = null;
+    if (!p || p.pid === undefined) return;
+    // The process is spawned `detached` (its own process group), so kill the
+    // whole group: with shell:true, p.pid is the `sh` wrapper and a plain
+    // p.kill() would leave the real `openshell logs` child orphaned.
+    try {
+      process.kill(-p.pid, "SIGTERM");
+    } catch {
       try {
-        proc.kill();
+        p.kill("SIGTERM");
       } catch {
         /* already gone */
       }
-      proc = null;
     }
   }
 
@@ -138,8 +145,9 @@ function streamLogs(sandbox: string) {
         }
       }
 
-      // Use openshell logs --tail for live streaming
-      proc = spawn(OPENSHELL, ["logs", name, "--tail"], { shell: true });
+      // Use openshell logs --tail for live streaming. `detached` puts it in its
+      // own process group so stop() can kill the whole group (see stop()).
+      proc = spawn(OPENSHELL, ["logs", name, "--tail"], { shell: true, detached: true });
 
       proc.stdout?.on("data", (data: Buffer) => {
         for (const line of data.toString().split("\n").filter(Boolean)) {
