@@ -47,6 +47,17 @@ RUN _hermes_certifi=$(/opt/hermes/.venv/bin/python -c 'import certifi; print(cer
 # WebSocket credential rewrite at the egress boundary.
 ENV HERMES_TELEGRAM_DISABLE_FALLBACK_IPS=1
 
+# Diffract branding: overlay version-matched TUI branding onto the base image's
+# Hermes (these files are pinned to the base image's Hermes version so the
+# bundle rebuilds cleanly — do NOT replace with a different Hermes version's
+# source) and rebuild the TUI bundle in place. Runs as root (the base's final
+# user state here) so /opt/hermes is writable; node + ui-tui/node_modules come
+# from the base image.
+COPY agents/hermes/branding/banner.ts /opt/hermes/ui-tui/src/banner.ts
+COPY agents/hermes/branding/theme.ts /opt/hermes/ui-tui/src/theme.ts
+COPY agents/hermes/branding/components/branding.tsx /opt/hermes/ui-tui/src/components/branding.tsx
+RUN cd /opt/hermes/ui-tui && node scripts/build.mjs && touch dist/entry.js
+
 # Copy NemoClaw plugin for Hermes (Python-based)
 COPY agents/hermes/plugin/ /opt/nemoclaw-hermes-plugin/
 RUN chmod -R a+rX /opt/nemoclaw-hermes-plugin/
