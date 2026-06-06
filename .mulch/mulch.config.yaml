@@ -1,8 +1,8 @@
 version: '1'
 domains:
-  - nemoclaw
-  - openshell
-  - diffract
+  nemoclaw: {}
+  openshell: {}
+  diffract: {}
 governance:
   max_entries: 100
   warn_entries: 150
