@@ -477,6 +477,15 @@ trap cleanup_fwd EXIT
 #     agent's inference calls to https://inference.local/v1 can't resolve/authenticate,
 #     so the chat connects but never replies.
 # Foreground so this systemd service supervises it (Restart=always brings it back).
+# Ensure the embedded TUI chat's PTY dependency is present. The base image ships only
+# the "messaging web" uv extras (Dockerfile.base HERMES_UV_EXTRAS), so the [pty] extra
+# (ptyprocess, used by hermes_cli/pty_bridge.py) is absent until a base rebuild includes
+# it -- without it the chat WS connects but immediately sends "Chat unavailable". Install
+# it here (presence-checked + idempotent; a no-op once the image carries pty) so chat
+# works on every (re)deploy without a rebuild.
+docker exec $CONTAINER_ID /opt/hermes/.venv/bin/python -c "import ptyprocess" 2>/dev/null \
+  || docker exec $CONTAINER_ID /opt/hermes/.venv/bin/python -m pip install "ptyprocess==0.7.0" || true
+
 echo "Starting Hermes dashboard (embedded TUI chat, OpenShell inference) in container..."
 docker exec -e HERMES_WEB_DIST=/opt/hermes/web_dist $CONTAINER_ID \
   bash -c '. /tmp/nemoclaw-proxy-env.sh 2>/dev/null; exec /opt/hermes/.venv/bin/python /usr/local/bin/hermes dashboard --host 0.0.0.0 --skip-build --insecure --tui'

@@ -26,7 +26,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Calver tag v2026.4.23 = semver 0.11.0.
 ARG HERMES_VERSION=v2026.4.23
 ARG HERMES_TARBALL_SHA256=1ee1be80a2112b7edc581770cee8858e725ba110cc423979cd7102492504bc6b
-ARG HERMES_UV_EXTRAS="messaging web"
+# "pty" pulls ptyprocess, required by the dashboard's embedded TUI chat
+# (hermes_cli/pty_bridge.py); without it /chat returns "Chat unavailable".
+ARG HERMES_UV_EXTRAS="messaging web pty"
 ARG UV_VERSION=0.11.8
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
