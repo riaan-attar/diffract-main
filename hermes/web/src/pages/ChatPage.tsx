@@ -10,6 +10,10 @@
  * the user switch between past conversations from the sidebar. History is resent
  * to the gateway each turn (OpenAI-style).
  *
+ * Streaming is tracked PER conversation (each send owns its AbortController, keyed
+ * by conversation id), so switching conversations mid-reply does NOT cancel the
+ * reply — it keeps streaming into its own conversation in the background.
+ *
  * Rendered persistently by App.tsx; `isActive` only drives input focus.
  */
 import { ArrowUp, MessageSquarePlus, PanelLeft, Square, Trash2 } from "lucide-react";
@@ -84,16 +88,24 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   );
   const [activeId, setActiveId] = useState<string | null>(initial.activeId);
   const [input, setInput] = useState("");
-  const [streaming, setStreaming] = useState(false);
+  // Ids of conversations currently streaming a reply (supports background streams).
+  const [streamingIds, setStreamingIds] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
   const [showList, setShowList] = useState(true);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  // One AbortController per in-flight conversation, so streams are independent.
+  const abortControllers = useRef<Map<string, AbortController>>(new Map());
+  // Latest activeId, for async callbacks that must not read a stale closure.
+  const activeIdRef = useRef<string | null>(activeId);
+  useEffect(() => {
+    activeIdRef.current = activeId;
+  }, [activeId]);
 
   const active = conversations.find((c) => c.id === activeId) || null;
   const messages = active?.messages ?? [];
+  const activeStreaming = activeId != null && streamingIds.has(activeId);
 
   // Persist on every change so reloads (and sandbox recreations) keep history.
   useEffect(() => {
@@ -110,7 +122,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [conversations, activeId, streaming]);
+  }, [conversations, activeId, streamingIds]);
 
   useEffect(() => {
     if (isActive) inputRef.current?.focus();
@@ -123,9 +135,9 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     [],
   );
 
+  // Switching conversations must NOT abort an in-flight reply — it keeps
+  // streaming into its own conversation in the background.
   const newChat = useCallback(() => {
-    abortRef.current?.abort();
-    setStreaming(false);
     setActiveId(null);
     setInput("");
     setError(null);
@@ -133,41 +145,45 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   }, []);
 
   const selectConv = useCallback((id: string) => {
-    abortRef.current?.abort();
-    setStreaming(false);
     setError(null);
     setActiveId(id);
   }, []);
 
-  const deleteConv = useCallback(
-    (id: string, e: React.MouseEvent) => {
-      e.stopPropagation();
-      setConversations((prev) => prev.filter((c) => c.id !== id));
-      setActiveId((cur) => (cur === id ? null : cur));
-    },
-    [],
-  );
+  const deleteConv = useCallback((id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    abortControllers.current.get(id)?.abort(); // stop its stream if any
+    abortControllers.current.delete(id);
+    setStreamingIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const n = new Set(prev);
+      n.delete(id);
+      return n;
+    });
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+    setActiveId((cur) => (cur === id ? null : cur));
+  }, []);
 
   const send = useCallback(async () => {
     const text = input.trim();
-    if (!text || streaming) return;
-    setError(null);
-    setInput("");
+    if (!text) return;
 
-    // Ensure there's a conversation to write into.
-    let convId = activeId;
-    if (!convId || !conversations.some((c) => c.id === convId)) {
-      convId = uid();
+    // Resolve the target conversation; block only if THAT conversation is busy.
+    let cid = activeId;
+    if (cid && streamingIds.has(cid)) return;
+    if (!cid || !conversations.some((c) => c.id === cid)) {
+      cid = uid();
       const conv: Conversation = {
-        id: convId,
+        id: cid,
         title: "New chat",
         messages: [],
         updatedAt: Date.now(),
       };
       setConversations((prev) => [conv, ...prev]);
-      setActiveId(convId);
+      setActiveId(cid);
     }
-    const cid = convId;
+
+    setError(null);
+    setInput("");
 
     const base = conversations.find((c) => c.id === cid)?.messages ?? [];
     const history: ChatMessage[] = [...base, { role: "user", content: text }];
@@ -177,10 +193,10 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       messages: [...history, { role: "assistant", content: "" }],
       updatedAt: Date.now(),
     }));
-    setStreaming(true);
+    setStreamingIds((prev) => new Set(prev).add(cid));
 
     const ac = new AbortController();
-    abortRef.current = ac;
+    abortControllers.current.set(cid, ac);
     try {
       const res = await fetch(CHAT_COMPLETIONS_URL, {
         method: "POST",
@@ -235,7 +251,10 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     } catch (e) {
       const aborted = e instanceof DOMException && e.name === "AbortError";
       if (!aborted) {
-        setError(e instanceof Error ? e.message : "Something went wrong.");
+        // Surface the error only when the user is looking at this conversation.
+        if (activeIdRef.current === cid) {
+          setError(e instanceof Error ? e.message : "Something went wrong.");
+        }
         updateConv(cid, (c) => {
           const msgs = c.messages.slice();
           const last = msgs[msgs.length - 1];
@@ -244,13 +263,19 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
         });
       }
     } finally {
-      setStreaming(false);
-      abortRef.current = null;
-      if (isActive) inputRef.current?.focus();
+      abortControllers.current.delete(cid);
+      setStreamingIds((prev) => {
+        if (!prev.has(cid)) return prev;
+        const n = new Set(prev);
+        n.delete(cid);
+        return n;
+      });
     }
-  }, [input, streaming, activeId, conversations, updateConv, isActive]);
+  }, [input, activeId, conversations, streamingIds, updateConv]);
 
-  const stop = useCallback(() => abortRef.current?.abort(), []);
+  const stop = useCallback(() => {
+    if (activeId) abortControllers.current.get(activeId)?.abort();
+  }, [activeId]);
 
   return (
     <div className="flex h-full min-h-0 flex-1">
@@ -279,14 +304,17 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
                   onClick={() => selectConv(c.id)}
                   className={cn(
                     "group mb-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors",
-                    c.id === activeId
-                      ? "bg-white/10"
-                      : "hover:bg-white/5",
+                    c.id === activeId ? "bg-white/10" : "hover:bg-white/5",
                   )}
                 >
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm text-text-primary">
-                      {c.title || "New chat"}
+                    <span className="flex items-center gap-1.5">
+                      {streamingIds.has(c.id) && (
+                        <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-midground" />
+                      )}
+                      <span className="block truncate text-sm text-text-primary">
+                        {c.title || "New chat"}
+                      </span>
                     </span>
                     <span className="block text-[0.7rem] text-text-tertiary">
                       {relTime(c.updatedAt)}
@@ -350,7 +378,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
                   )}
                 >
                   {m.content ||
-                    (streaming && i === messages.length - 1 ? (
+                    (activeStreaming && i === messages.length - 1 ? (
                       <span className="text-text-tertiary">…</span>
                     ) : (
                       ""
@@ -381,7 +409,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
               placeholder="Message Diffract Agent…"
               className="max-h-40 min-h-[2.75rem] flex-1 resize-none rounded-xl border border-white/10 bg-white/5 px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-tertiary focus:border-midground focus:outline-none"
             />
-            {streaming ? (
+            {activeStreaming ? (
               <button
                 type="button"
                 onClick={stop}
