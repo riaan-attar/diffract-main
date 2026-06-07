@@ -476,9 +476,26 @@ ensure_9119_forward() {
         socat TCP-LISTEN:9119,bind=127.0.0.1,fork,reuseaddr TCP:$CONTAINER_IP:$HOP_PORT &
     fi
 }
+# --- Port 8642 (agent OpenAI-compatible gateway -- the chat backend) ---
+# The gateway is started via nemoclaw-start over the openshell ssh session, so its
+# api_server listens in the sandbox WORKLOAD netns (127.0.0.1:18642, fronted by an
+# in-sandbox socat on :8642), NOT the container bridge netns. A host socat to the
+# bridge IP cannot reach it -> Caddy /v1/* returns 502 and the chat UI fails. Use an
+# openshell loopback (ssh -L) forward, which lands in the workload netns where the
+# gateway lives. (Same netns split as 9119, opposite direction: 9119's dashboard is
+# in the CONTAINER netns, 8642's gateway is in the WORKLOAD netns.)
+ensure_8642_forward() {
+    if ! ss -ltn 2>/dev/null | grep -q '127.0.0.1:8642'; then
+        openshell forward stop 8642 "$SANDBOX_NAME" >/dev/null 2>&1 || true
+        pkill -f -- '-L 127.0.0.1:8642:127.0.0.1:8642' 2>/dev/null || true
+        openshell forward start --background 8642 "$SANDBOX_NAME" >/dev/null 2>&1 || true
+    fi
+}
 cleanup_fwd() {
-    kill $KEEPALIVE_PID $SOCAT_PID2 2>/dev/null || true
+    kill $KEEPALIVE_PID 2>/dev/null || true
     pkill -f 'TCP-LISTEN:9119,bind=127.0.0.1' 2>/dev/null || true
+    openshell forward stop 8642 "$SANDBOX_NAME" >/dev/null 2>&1 || true
+    pkill -f -- '-L 127.0.0.1:8642:127.0.0.1:8642' 2>/dev/null || true
     docker exec $CONTAINER_ID sh -c "pkill -f 'TCP-LISTEN:$HOP_PORT' 2>/dev/null; true" >/dev/null 2>&1 || true
     docker exec $CONTAINER_ID /opt/hermes/.venv/bin/python /usr/local/bin/hermes dashboard --stop || true
 }
@@ -486,12 +503,11 @@ echo "Starting loopback-reorigination forwarder on port 9119 (hop via container 
 ensure_9119_forward
 # End-to-end keepalive: HTTP and WS share the hop, so a 2xx on 9119 proves the loopback
 # origination (hence the WS peer) is live. Rebuild the hop if the real path stops answering.
-( while true; do sleep 15; curl -sf --max-time 5 -o /dev/null http://127.0.0.1:9119/agent/ 2>/dev/null || ensure_9119_forward; done ) &
+( while true; do sleep 15; curl -sf --max-time 5 -o /dev/null http://127.0.0.1:9119/agent/ 2>/dev/null || ensure_9119_forward; ensure_8642_forward; done ) &
 KEEPALIVE_PID=$!
 
-echo "Starting socat forwarder on port 8642 to $CONTAINER_IP:8642..."
-socat TCP-LISTEN:8642,fork,reuseaddr TCP:$CONTAINER_IP:8642 &
-SOCAT_PID2=$!
+echo "Starting loopback gateway forward (openshell ssh -L) on port 8642..."
+ensure_8642_forward
 
 # Stop any stale dashboard inside the container so the fresh one can bind 9119,
 # and make sure both the dashboard and the socat forwarders are torn down when
