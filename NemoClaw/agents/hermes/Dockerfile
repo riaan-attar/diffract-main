@@ -136,13 +136,12 @@ RUN node --experimental-strip-types /opt/nemoclaw-hermes-config/generate-config.
 RUN mkdir -p /sandbox/.hermes/plugins/nemoclaw \
     && cp -r /opt/nemoclaw-hermes-plugin/* /sandbox/.hermes/plugins/nemoclaw/
 
-# Write a default SOUL.md for the sandboxed agent.
-RUN mkdir -p /sandbox/.hermes/memories \
-    && printf '%s\n' \
-    'You are a helpful AI assistant running inside an NVIDIA OpenShell sandbox.' \
-    'Your inference is routed through NemoClaw. You have access to terminal,' \
-    'file, and web tools. Be concise and helpful.' \
-    > /sandbox/.hermes/SOUL.md
+# Write the Diffract agent identity (SOUL.md) for the sandboxed agent.
+# Canonical source: agents/hermes/SOUL.md (single source of truth). The live
+# Diffract deploy re-applies this same file into the sandbox via setup.sh's
+# forwarder until a rebuilt image ships it, so keep the two in sync.
+RUN mkdir -p /sandbox/.hermes/memories
+COPY --chown=sandbox:sandbox agents/hermes/SOUL.md /sandbox/.hermes/SOUL.md
 
 # Set mutable-default permissions (640/750 sandbox:sandbox).
 # The sandbox user can write config; the gateway user can read it via

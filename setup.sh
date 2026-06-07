@@ -120,12 +120,18 @@ apply_diffract_branding() {
     fi
 
     local did=0
+    # Canonical Diffract agent identity (single source of truth; also baked into
+    # the sandbox image by NemoClaw/agents/hermes/Dockerfile).
+    local _soul="$PROJECT_ROOT/NemoClaw/agents/hermes/SOUL.md"
 
     # --- Host-level Hermes checkout ---
     local DEST
     if DEST=$(resolve_hermes_dir); then
         print_success "Found host Hermes at: $DEST"
         _overlay_host "$SRC" "$DEST"
+        # Stage the canonical SOUL.md on the host so the port-forwarder can
+        # re-apply it into the sandbox on each start (until a rebuilt image ships it).
+        [ -f "$_soul" ] && cp -f "$_soul" "$DEST/SOUL.md" || true
         did=1
     fi
 
@@ -138,6 +144,14 @@ apply_diffract_branding() {
         if [ -n "${cid:-}" ] && docker exec "$cid" test -d /opt/hermes/hermes_cli 2>/dev/null; then
             print_success "Found Hermes in sandbox container: ${sb} (${cid})"
             _overlay_container "$SRC" "$cid"
+            # Apply the Diffract agent identity (SOUL.md) into the sandbox now. It's a
+            # data file (the agent's primary identity), safe to overlay live — unlike
+            # the version-skew-sensitive Python/TUI that _overlay_container avoids.
+            if [ -f "$_soul" ]; then
+                docker cp "$_soul" "$cid:/sandbox/.hermes/SOUL.md" 2>/dev/null \
+                  && docker exec "$cid" sh -c 'chown sandbox:sandbox /sandbox/.hermes/SOUL.md 2>/dev/null; chmod 0644 /sandbox/.hermes/SOUL.md' 2>/dev/null \
+                  && print_success "  Diffract agent identity (SOUL.md) applied to sandbox"
+            fi
             did=1
         fi
     fi
@@ -419,6 +433,20 @@ fi
 echo "Copying UI assets to container $CONTAINER_ID..."
 docker exec $CONTAINER_ID mkdir -p /opt/hermes/web_dist
 docker cp /usr/local/lib/hermes-agent/hermes_cli/web_dist/. $CONTAINER_ID:/opt/hermes/web_dist/
+
+# Keep the agent identity on-brand. If the sandbox image still ships an older
+# (Hermes/NemoClaw) SOUL.md, replace it with the deployment's canonical Diffract
+# SOUL.md (staged on the host by setup.sh's branding step). Self-deactivates once a
+# rebuilt image bakes the Diffract identity (no old markers -> no overwrite) and
+# leaves a genuinely custom SOUL.md alone. SOUL.md is a data file (the agent's
+# primary identity), safe to overlay live -- unlike the version-skew-sensitive
+# Python/TUI. Canonical source: NemoClaw/agents/hermes/SOUL.md.
+SOUL_SRC=/usr/local/lib/hermes-agent/SOUL.md
+if [ -f "$SOUL_SRC" ] && docker exec $CONTAINER_ID sh -c '[ ! -f /sandbox/.hermes/SOUL.md ] || grep -qiE "NemoClaw|OpenShell sandbox|Hermes Agent|helpful AI assistant running" /sandbox/.hermes/SOUL.md' 2>/dev/null; then
+    docker cp "$SOUL_SRC" $CONTAINER_ID:/sandbox/.hermes/SOUL.md 2>/dev/null \
+      && docker exec $CONTAINER_ID sh -c 'chown sandbox:sandbox /sandbox/.hermes/SOUL.md 2>/dev/null; chmod 0644 /sandbox/.hermes/SOUL.md' 2>/dev/null \
+      && echo "Applied Diffract agent identity (SOUL.md) to sandbox"
+fi
 
 echo "Finding container IP..."
 CONTAINER_IP=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $CONTAINER_ID)
