@@ -37,16 +37,24 @@ async function requireSession(): Promise<Response | null> {
   return Response.json({ error: "Unauthorized" }, { status: 401 });
 }
 
-/** Resolve a validated sandbox name to its exact running container id, or null. */
+/**
+ * Resolve a validated sandbox name to its exact running container id, or null.
+ *
+ * OpenShell names containers `openshell-<name>-<uuid>`, so a name-based filter
+ * would need a fragile substring/prefix match (and `foo` would shadow `foobar`).
+ * Instead we match the exact OpenShell label `openshell.ai/sandbox-name`, which
+ * docker compares by value — unambiguous and UUID-suffix-proof.
+ */
 async function resolveContainer(sandbox: string): Promise<string | null> {
   if (!sandbox || !SANDBOX_NAME_RE.test(sandbox)) return null;
   try {
-    // Anchor the name so `openshell-foo` can't match `openshell-foobar`.
     const { stdout } = await execFileAsync(DOCKER, [
       "ps",
       "-q",
       "-f",
-      `name=^openshell-${sandbox}$`,
+      "label=openshell.ai/managed-by=openshell",
+      "-f",
+      `label=openshell.ai/sandbox-name=${sandbox}`,
     ]);
     const cid = stdout.trim().split("\n").filter(Boolean)[0];
     return cid || null;
