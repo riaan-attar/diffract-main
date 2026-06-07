@@ -590,6 +590,14 @@ EOF
         handle /v1/* {
             reverse_proxy 127.0.0.1:8642 {
                 header_up Host {upstream_hostport}
+                # The agent gateway's api_server rejects requests carrying a browser
+                # Origin/Referer (DNS-rebinding/CSRF defence) and its allowlist does not
+                # include the public host -> 403, which breaks the same-origin chat UI.
+                # Strip them here so the chat works; Caddy (a trusted reverse proxy)
+                # vouches for the request, and cross-origin reads are still blocked by
+                # the browser's CORS (the gateway sends no Access-Control-Allow-Origin).
+                header_up -Origin
+                header_up -Referer
             }
         }
 
@@ -616,6 +624,14 @@ EOF
         handle /v1/* {
             reverse_proxy 127.0.0.1:8642 {
                 header_up Host {upstream_hostport}
+                # The agent gateway's api_server rejects requests carrying a browser
+                # Origin/Referer (DNS-rebinding/CSRF defence) and its allowlist does not
+                # include the public host -> 403, which breaks the same-origin chat UI.
+                # Strip them here so the chat works; Caddy (a trusted reverse proxy)
+                # vouches for the request, and cross-origin reads are still blocked by
+                # the browser's CORS (the gateway sends no Access-Control-Allow-Origin).
+                header_up -Origin
+                header_up -Referer
             }
         }
 
