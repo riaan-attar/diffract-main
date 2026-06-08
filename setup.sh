@@ -440,6 +440,13 @@ EOF
         install -m 0755 "$PROJECT_ROOT/scripts/diffract-tool-add.sh" /usr/local/bin/diffract-tool-add.sh \
             && print_success "  installed diffract-tool-add.sh"
     fi
+    # Install the gateway watchdog — keeps the agent chat backend (8642) alive by
+    # health-checking it and recovering a crashed gateway / dead forward. Runs as
+    # its own systemd service (defined below) so every deployment is self-healing.
+    if [ -f "$PROJECT_ROOT/scripts/diffract-gateway-watchdog.sh" ]; then
+        install -m 0755 "$PROJECT_ROOT/scripts/diffract-gateway-watchdog.sh" /usr/local/bin/diffract-gateway-watchdog.sh \
+            && print_success "  installed diffract-gateway-watchdog.sh"
+    fi
     if [ -f "$PROJECT_ROOT/NemoClaw/agents/hermes/diffract-tools.json" ]; then
         mkdir -p /usr/local/share/diffract \
             && install -m 0644 "$PROJECT_ROOT/NemoClaw/agents/hermes/diffract-tools.json" /usr/local/share/diffract/diffract-tools.json
@@ -597,9 +604,32 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
+    # Create the gateway watchdog service (keeps the chat backend self-healing).
+    cat <<EOF > /etc/systemd/system/diffract-gateway-watchdog.service
+[Unit]
+Description=Diffract Gateway Watchdog (agent chat backend self-heal)
+After=network.target docker.service sandbox-port-forwarder.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=root
+Environment=PATH=$PATH
+ExecStart=/usr/local/bin/diffract-gateway-watchdog.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
     systemctl daemon-reload
     systemctl enable sandbox-port-forwarder.service
     systemctl restart sandbox-port-forwarder.service
+    if [ -x /usr/local/bin/diffract-gateway-watchdog.sh ]; then
+        systemctl enable diffract-gateway-watchdog.service
+        systemctl restart diffract-gateway-watchdog.service
+    fi
     systemctl restart diffractui
 
     sleep 3
