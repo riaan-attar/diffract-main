@@ -30,7 +30,8 @@ fi
 
 mkdir -p "$ROOT"
 
-# Emit one TAB-separated line per tool: name<TAB>repo<TAB>ref<TAB>build<TAB>entry<TAB>bin
+# Emit one TAB-separated line per tool: name<TAB>repo<TAB>ref<TAB>patch<TAB>build<TAB>entry<TAB>bin
+# (patch/build may contain spaces but not tabs/newlines — fields are TAB-split.)
 TOOLS="$(node -e '
 const fs = require("fs");
 const reg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -41,19 +42,25 @@ for (const t of (reg.tools || [])) {
   }
   const bin = t.bin || t.name;
   const ref = t.ref || "main";
+  const patch = t.patch || "";
   const build = t.build || "";
-  process.stdout.write([t.name, t.repo, ref, build, t.entry, bin].join("\t") + "\n");
+  process.stdout.write([t.name, t.repo, ref, patch, build, t.entry, bin].join("\t") + "\n");
 }' "$REGISTRY")"
 
 if [ -z "$TOOLS" ]; then
   echo "[diffract-tools] no tools to install"
 else
-  printf '%s\n' "$TOOLS" | while IFS=$'\t' read -r name repo ref build entry bin; do
+  printf '%s\n' "$TOOLS" | while IFS=$'\t' read -r name repo ref patch build entry bin; do
     [ -z "$name" ] && continue
     dir="$ROOT/$name"
     echo "[diffract-tools] installing '$name' from $repo@$ref"
     rm -rf "$dir"
     git clone --depth 1 --branch "$ref" "$repo" "$dir"
+    # Optional proxy-compat / source fixup, run in the tool dir before building.
+    if [ -n "$patch" ]; then
+      echo "[diffract-tools]   applying patch for '$name'"
+      ( cd "$dir" && eval "$patch" )
+    fi
     if [ -n "$build" ]; then
       ( cd "$dir" && eval "$build" )
     fi

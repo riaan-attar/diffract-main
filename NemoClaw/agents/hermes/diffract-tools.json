@@ -1,5 +1,5 @@
 {
-  "$comment": "Diffract universal tool registry. Each entry defines a third-party CLI the agent can use. The INSTALL fields (repo/ref/kind/build/entry/bin) are consumed at image-build time by install-diffract-tools.sh to bake the tool into /sandbox/.diffract-tools/<name> and put <bin> on the agent PATH. The CONNECT fields (secretEnv/configEnv/apiHosts/authHeader) describe how to wire the tool's credentials securely at runtime via diffract-tool-connect.sh (OpenShell generic provider -> placeholder in sandbox -> real secret injected at egress). Add a tool = add an entry here; no Dockerfile edit.",
+  "$comment": "Diffract universal tool registry. Each entry defines a third-party CLI the agent can use. INSTALL fields (repo/ref/kind/patch/build/entry/bin) are consumed at image-build time by install-diffract-tools.sh to bake the tool into /sandbox/.diffract-tools/<name> and put <bin> on the agent PATH. CONNECT fields (secretEnv/configEnv/apiHosts/binaries/authHeader) are consumed at runtime by diffract-tool-connect.sh to wire the tool's credentials securely (OpenShell generic provider -> placeholder in sandbox -> real secret injected at egress; egress allowlisted to apiHosts, attributed to binaries). 'patch' is an optional shell command run after clone and before build, in the tool dir — use it for proxy-compat fixups (the sandbox routes egress through an MITM proxy; node tools must use undici/fetch, so an axios tool needs adapter:'fetch'). Add a tool = add an entry here; no Dockerfile edit.",
   "tools": [
     {
       "name": "ghl",
@@ -7,6 +7,7 @@
       "repo": "https://github.com/hrubee/GHL-CLI.git",
       "ref": "main",
       "kind": "node",
+      "patch": "sed -i 's/axios.create({/axios.create({ adapter: \"fetch\",/' src/client.ts",
       "build": "npm ci --no-audit --no-fund && npm run build",
       "entry": "dist/index.js",
       "bin": "ghl",
@@ -16,6 +17,9 @@
       },
       "apiHosts": [
         "services.leadconnectorhq.com:443"
+      ],
+      "binaries": [
+        "/usr/local/bin/node"
       ],
       "authHeader": "Authorization: Bearer"
     }
