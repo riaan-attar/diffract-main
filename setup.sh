@@ -414,6 +414,19 @@ EOF
     # Install dependencies for the wrapper script
     apt-get install -y jq socat
 
+    # Install the sandbox persistence helper (back up / restore the user's
+    # working files across destroy/recreate — OpenShell sandboxes have no
+    # volume, so the host is the only durable store). Used by the forwarder
+    # (restore-on-boot + periodic backup) and the diffractui destroy handler
+    # (backup-before-destroy). See scripts/diffract-persist.sh.
+    if [ -f "$PROJECT_ROOT/scripts/diffract-persist.sh" ]; then
+        install -m 0755 "$PROJECT_ROOT/scripts/diffract-persist.sh" /usr/local/bin/diffract-persist.sh \
+            && print_success "  installed diffract-persist.sh"
+    else
+        print_warning "  scripts/diffract-persist.sh not found; sandbox file persistence disabled"
+    fi
+    mkdir -p /var/lib/diffract/persist
+
     cat <<'EOF' > /usr/local/bin/sandbox-port-forwarder.sh
 #!/bin/bash
 set -e
@@ -446,6 +459,13 @@ if [ -f "$SOUL_SRC" ] && docker exec $CONTAINER_ID sh -c '[ ! -f /sandbox/.herme
     docker cp "$SOUL_SRC" $CONTAINER_ID:/sandbox/.hermes/SOUL.md 2>/dev/null \
       && docker exec $CONTAINER_ID sh -c 'chown sandbox:sandbox /sandbox/.hermes/SOUL.md 2>/dev/null; chmod 0644 /sandbox/.hermes/SOUL.md' 2>/dev/null \
       && echo "Applied Diffract agent identity (SOUL.md) to sandbox"
+fi
+
+# Restore the user's working files into a freshly-created sandbox. This is a
+# no-op on a returning container (marker-gated, once per container lifetime), so
+# it never clobbers a running sandbox's newer files. See diffract-persist.sh.
+if [ -x /usr/local/bin/diffract-persist.sh ]; then
+    /usr/local/bin/diffract-persist.sh restore "$SANDBOX_NAME" || true
 fi
 
 echo "Finding container IP..."
@@ -503,7 +523,7 @@ echo "Starting loopback-reorigination forwarder on port 9119 (hop via container 
 ensure_9119_forward
 # End-to-end keepalive: HTTP and WS share the hop, so a 2xx on 9119 proves the loopback
 # origination (hence the WS peer) is live. Rebuild the hop if the real path stops answering.
-( while true; do sleep 15; curl -sf --max-time 5 -o /dev/null http://127.0.0.1:9119/agent/ 2>/dev/null || ensure_9119_forward; ensure_8642_forward; done ) &
+( i=0; while true; do sleep 15; curl -sf --max-time 5 -o /dev/null http://127.0.0.1:9119/agent/ 2>/dev/null || ensure_9119_forward; ensure_8642_forward; i=$((i+1)); if [ "$((i % 20))" -eq 0 ] && [ -x /usr/local/bin/diffract-persist.sh ]; then /usr/local/bin/diffract-persist.sh backup-if-ready "$SANDBOX_NAME" >/dev/null 2>&1 || true; fi; done ) &
 KEEPALIVE_PID=$!
 
 echo "Starting loopback gateway forward (openshell ssh -L) on port 8642..."

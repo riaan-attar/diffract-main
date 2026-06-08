@@ -1,9 +1,31 @@
 export const dynamic = "force-dynamic";
 import { spawn } from "child_process";
+import { existsSync } from "fs";
 import { cookies } from "next/headers";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 
 const DIFFRACT = process.env.DIFFRACT_PATH || "nemoclaw";
+// Host helper that captures a sandbox's working files before destroy so they
+// survive recreate (OpenShell sandboxes have no volume). Installed by setup.sh.
+const PERSIST_SCRIPT = process.env.DIFFRACT_PERSIST_SCRIPT || "/usr/local/bin/diffract-persist.sh";
+const SANDBOX_NAME_RE = /^[a-zA-Z0-9_-]+$/;
+
+// Best-effort backup of the sandbox home to the host store before we destroy
+// the container. Never blocks or fails the destroy — if the helper is missing
+// (e.g. local dev) or errors, we just skip it. argv array, no shell.
+function backupBeforeDestroy(sandbox: string): Promise<string | null> {
+  if (!SANDBOX_NAME_RE.test(sandbox) || !existsSync(PERSIST_SCRIPT)) {
+    return Promise.resolve(null);
+  }
+  return new Promise<string | null>((resolve) => {
+    let out = "";
+    const b = spawn(PERSIST_SCRIPT, ["backup", sandbox]);
+    b.stdout?.on("data", (d: Buffer) => (out += d.toString()));
+    b.stderr?.on("data", (d: Buffer) => (out += d.toString()));
+    b.on("close", () => resolve(out.trim() || "backup attempted"));
+    b.on("error", () => resolve(null));
+  });
+}
 
 // Defense-in-depth: re-verify the admin session inside the handler, not just
 // in proxy.ts (the Next docs warn a matcher change can silently drop coverage).
@@ -164,6 +186,10 @@ export async function DELETE(request: Request) {
     return Response.json({ error: "Sandbox name required" }, { status: 400 });
   }
 
+  // Capture the user's working files to the host store BEFORE destroying, so a
+  // recreated sandbox can restore them. Best-effort; never blocks the destroy.
+  const backup = await backupBeforeDestroy(sandbox);
+
   const proc = spawn(DIFFRACT, [sandbox, "destroy", "--yes"], {
     shell: true,
   });
@@ -171,9 +197,9 @@ export async function DELETE(request: Request) {
   return new Promise<Response>((resolve) => {
     proc.on("close", (code) => {
       if (code === 0) {
-        resolve(Response.json({ success: true }));
+        resolve(Response.json({ success: true, backup }));
       } else {
-        resolve(Response.json({ error: "Destroy failed" }, { status: 500 }));
+        resolve(Response.json({ error: "Destroy failed", backup }, { status: 500 }));
       }
     });
   });
