@@ -1,5 +1,5 @@
 {
-  "$comment": "Diffract universal tool registry. Each entry defines a third-party CLI the agent can use. INSTALL fields (repo/ref/kind/patch/build/entry/bin) are consumed at image-build time by install-diffract-tools.sh to bake the tool into /sandbox/.diffract-tools/<name> and put <bin> on the agent PATH. CONNECT fields (secretEnv/configEnv/apiHosts/binaries/authHeader) are consumed at runtime by diffract-tool-connect.sh to wire the tool's credentials securely (OpenShell generic provider -> placeholder in sandbox -> real secret injected at egress; egress allowlisted to apiHosts, attributed to binaries). 'patch' is an optional shell command run after clone and before build, in the tool dir — use it for proxy-compat fixups (the sandbox routes egress through an MITM proxy; node tools must use undici/fetch, so an axios tool needs adapter:'fetch'). Add a tool = add an entry here; no Dockerfile edit.",
+  "$comment": "Diffract universal tool registry. Each entry defines a third-party CLI the agent can use, across four layers. INSTALL fields (repo/ref/kind/patch/build/entry/bin) are consumed at image-build time by install-diffract-tools.sh to bake the tool into /sandbox/.diffract-tools/<name> and put <bin> on the agent PATH. CONNECT fields (secretEnv/configEnv/apiHosts/binaries/authHeader) are consumed at runtime by diffract-tool-connect.sh to wire the tool's credentials securely (OpenShell generic provider -> placeholder in sandbox -> real secret injected at egress; egress allowlisted to apiHosts, attributed to binaries). ADVERTISE fields (the optional 'skill' object: name/title/summary/tags/examples) are consumed at image-build time by advertise-diffract-tools.sh to emit a hermes SKILL.md under /sandbox/.hermes/skills/diffract-tools/<name>, so the agent DISCOVERS the tool in its skill catalog and knows it is pre-authenticated (install/connect make a tool runnable; advertise makes the agent aware of it). 'patch' is an optional shell command run after clone and before build, in the tool dir — use it for proxy-compat fixups (the sandbox routes egress through an MITM proxy; node tools must use undici/fetch, so an axios tool needs adapter:'fetch'). Add a tool = add an entry here; no Dockerfile edit.",
   "tools": [
     {
       "name": "ghl",
@@ -21,7 +21,20 @@
       "binaries": [
         "/usr/local/bin/node"
       ],
-      "authHeader": "Authorization: Bearer"
+      "authHeader": "Authorization: Bearer",
+      "skill": {
+        "name": "ghl-crm",
+        "title": "GoHighLevel CRM",
+        "summary": "List and manage GoHighLevel CRM data — contacts, opportunities, conversations, calendars, and invoices — via the pre-authenticated ghl CLI.",
+        "tags": ["CRM", "GoHighLevel", "Contacts", "Sales", "Invoices"],
+        "examples": [
+          "ghl contacts list",
+          "ghl contacts get <contactId>",
+          "ghl opportunities list",
+          "ghl conversations list",
+          "ghl calendar events list"
+        ]
+      }
     }
   ]
 }

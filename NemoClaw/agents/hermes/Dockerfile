@@ -334,6 +334,16 @@ RUN sha256sum /sandbox/.hermes/config.yaml /sandbox/.hermes/.env \
     && chmod 600 /sandbox/.hermes/.config-hash \
     && chown sandbox:sandbox /sandbox/.hermes/.config-hash
 
+# ADVERTISE layer (4th): emit a hermes SKILL.md per registry tool so the agent
+# DISCOVERS the baked, pre-authenticated CLI in its skill catalog. Runs HERE
+# (not at the install step above) because /sandbox/.hermes/skills only exists
+# after the .hermes setup. Skills are NOT part of the config-integrity hash, so
+# this is safe to add after the hash pin. Adding a tool's `skill` block to
+# diffract-tools.json is all it takes — no edit here.
+COPY agents/hermes/advertise-diffract-tools.sh /usr/local/bin/advertise-diffract-tools.sh
+RUN chmod +x /usr/local/bin/advertise-diffract-tools.sh \
+    && /usr/local/bin/advertise-diffract-tools.sh /opt/nemoclaw-diffract/diffract-tools.json
+
 # OpenShell's macOS VM backend currently remaps extracted rootfs ownership to
 # the host uid/gid before startup. Hermes uses /sandbox as a read_write path, so
 # that repair walks the trusted rc files too; keep this Darwin-only so Linux
