@@ -35,9 +35,16 @@ export async function POST(request: Request) {
     if (await agentPathHealthy()) {
       return Response.json({ success: true, message: "agent forward healthy (socat, service-managed)" });
     }
-    // Down — let the forwarder rebuild the socat chain. (Restarting the service
-    // is the safe recovery; it does NOT create an openshell forward for 9119.)
+    // Down — recover it. Clear any stray `openshell forward` squatting on the
+    // port (e.g. left by `nemoclaw recover` or a manual restart) since it would
+    // block the socat rebuild, then let the service rebuild the socat chain.
+    // Neither step creates an openshell forward for 9119.
     try {
+      try {
+        await runCommand(OPENSHELL, ["forward", "stop", port, sandbox]);
+      } catch {
+        // no stray forward — fine
+      }
       await runCommand("systemctl", ["restart", FORWARDER_SERVICE]);
       return Response.json({ success: true, message: "rebuilt agent forward via sandbox-port-forwarder" });
     } catch (err) {
