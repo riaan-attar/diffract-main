@@ -67,6 +67,27 @@ RUN cd /opt/hermes/ui-tui \
     && touch dist/entry.js \
     && rm -rf node_modules
 
+# ── Diffract: bake user CLI tools so they survive sandbox destroy/recreate ──
+# OpenShell sandboxes have no persistent volume — everything under /sandbox is
+# rebuilt from this Dockerfile on each `nemoclaw onboard`, so tools a user
+# installs at runtime (e.g. GHL CLI via the dashboard) vanish on destroy. Bake
+# them into the image instead. GHL CLI (https://github.com/hrubee/GHL-CLI) is a
+# public TypeScript CLI: clone a pinned ref, install + build, and expose `ghl`
+# on PATH via /usr/local/bin. node/npm/git come from the base image and
+# build-time network is available (the ui-tui step above already runs npm ci).
+# node_modules is intentionally retained — dist/index.js needs it at runtime.
+ARG GHL_CLI_REPO=https://github.com/hrubee/GHL-CLI.git
+ARG GHL_CLI_REF=main
+RUN set -eux; \
+    git clone --depth 1 --branch "${GHL_CLI_REF}" "${GHL_CLI_REPO}" /opt/diffract-tools/GHL-CLI; \
+    cd /opt/diffract-tools/GHL-CLI; \
+    npm ci --no-audit --no-fund; \
+    npm run build; \
+    ln -sf /opt/diffract-tools/GHL-CLI/dist/index.js /usr/local/bin/ghl; \
+    chmod +x /opt/diffract-tools/GHL-CLI/dist/index.js; \
+    rm -rf .git /root/.npm; \
+    chmod -R a+rX /opt/diffract-tools
+
 # Copy NemoClaw plugin for Hermes (Python-based)
 COPY agents/hermes/plugin/ /opt/nemoclaw-hermes-plugin/
 RUN chmod -R a+rX /opt/nemoclaw-hermes-plugin/
