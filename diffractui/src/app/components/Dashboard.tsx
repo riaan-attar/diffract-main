@@ -306,11 +306,25 @@ export default function Dashboard({ sandboxName, onDestroyed }: Props) {
             }} labelOverride={tokenCopied === "connect" ? "Copied!" : undefined} />
             <ActionButton label="Restart" desc="Restart sandbox" variant="secondary" onClick={() => {}} />
             <ActionButton label="Destroy" desc="Delete sandbox" variant="danger" onClick={() => {
-              if (confirm(`Destroy sandbox "${sandboxName}"? This is irreversible.`)) {
+              if (
+                confirm(
+                  `Destroy sandbox "${sandboxName}"?\n\n` +
+                    `Your working files in /sandbox are backed up first. To get them back, recreate the sandbox with the SAME name ("${sandboxName}").\n\n` +
+                    `Installed tools baked into the image (e.g. GHL CLI) always return. Tools you installed into /sandbox yourself will NOT be restored with working deps — those should be baked in.`,
+                )
+              ) {
                 fetch(`/api/deploy?action=destroy&sandbox=${sandboxName}`, { method: "DELETE" })
                   .then((r) => r.json())
                   .then((data) => {
-                    if (data.success) onDestroyed();
+                    if (data.success) {
+                      const saved = typeof data.backup === "string" && data.backup.includes("saved");
+                      alert(
+                        saved
+                          ? `Sandbox destroyed. Your working files were backed up — recreate with the name "${sandboxName}" to restore them.`
+                          : `Sandbox destroyed. (No working files needed backing up.)`,
+                      );
+                      onDestroyed();
+                    }
                   })
                   .catch(() => {});
               }
