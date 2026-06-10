@@ -7,7 +7,7 @@
       "repo": "https://github.com/hrubee/GHL-CLI.git",
       "ref": "main",
       "kind": "node",
-      "patch": "sed -i 's/axios.create({/axios.create({ adapter: \"fetch\",/' src/client.ts",
+      "patch": "sed -i 's/axios.create({/axios.create({ adapter: \"fetch\",/' src/client.ts && sed -i 's/params\\.q = opts\\.query/params.query = opts.query/' src/commands/*.ts",
       "build": "npm ci --no-audit --no-fund && npm run build",
       "entry": "dist/index.js",
       "bin": "ghl",
