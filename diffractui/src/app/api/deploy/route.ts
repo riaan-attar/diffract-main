@@ -1,5 +1,5 @@
 export const dynamic = "force-dynamic";
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 import { existsSync } from "fs";
 import { cookies } from "next/headers";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
@@ -88,6 +88,23 @@ export async function GET(request: Request) {
   if (discordToken) env.DISCORD_BOT_TOKEN = discordToken;
   if (slackToken) env.SLACK_BOT_TOKEN = slackToken;
 
+  // Diffract universal-tool infra: attach EVERY connected tool (any CLI in the
+  // registry that has a provider) at sandbox CREATE so the chat agent can use it.
+  // OpenShell >= 0.0.57 injects a tool's credential into the long-running agent
+  // daemon only at create, so attaching after create reaches exec sessions but
+  // not chat. The list is computed from the registry (diffract-tool-sync.sh) —
+  // adding a tool needs no code here. Egress for each is applied after onboard.
+  try {
+    const connected = execSync("/usr/local/bin/diffract-tool-sync.sh providers", {
+      encoding: "utf8",
+      timeout: 15000,
+    }).trim();
+    if (connected) env.NEMOCLAW_SANDBOX_EXTRA_PROVIDERS = connected;
+  } catch {
+    // sync helper missing or gateway not yet up — deploy proceeds; tools can be
+    // wired on a later recreate once connected.
+  }
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -142,8 +159,12 @@ export async function GET(request: Request) {
           // Restart the port forwarder systemd service
           import("child_process").then(({ exec }) => {
             exec(`sudo systemctl restart sandbox-port-forwarder`);
+            // Apply each connected tool's egress (host + attributed binary, from
+            // the registry) to the fresh sandbox so the tools attached at create
+            // can reach their APIs. Registry-driven — covers any connected tool.
+            exec(`/usr/local/bin/diffract-tool-sync.sh egress ${sName}`);
           });
-          
+
           send("done", "Deployment complete", {
             sandboxName: sName,
           });

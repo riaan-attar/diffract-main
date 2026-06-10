@@ -440,6 +440,14 @@ EOF
         install -m 0755 "$PROJECT_ROOT/scripts/diffract-tool-add.sh" /usr/local/bin/diffract-tool-add.sh \
             && print_success "  installed diffract-tool-add.sh"
     fi
+    # Install the universal tool sync (registry-driven). Makes EVERY connected
+    # tool usable by the chat agent: lists connected tools for attach-at-create
+    # (NEMOCLAW_SANDBOX_EXTRA_PROVIDERS) and applies each tool's egress from the
+    # registry. The deploy flow calls it so adding any CLI needs no code change.
+    if [ -f "$PROJECT_ROOT/scripts/diffract-tool-sync.sh" ]; then
+        install -m 0755 "$PROJECT_ROOT/scripts/diffract-tool-sync.sh" /usr/local/bin/diffract-tool-sync.sh \
+            && print_success "  installed diffract-tool-sync.sh"
+    fi
     # Install the gateway watchdog — keeps the agent chat backend (8642) alive by
     # health-checking it and recovering a crashed gateway / dead forward. Runs as
     # its own systemd service (defined below) so every deployment is self-healing.
