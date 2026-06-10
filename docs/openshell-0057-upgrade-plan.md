@@ -165,7 +165,25 @@ Deploy NemoClaw with the Phase-1 changes onto a **throwaway** sandbox and run th
 | **Dashboard tool-use:** `ghl` via the `:8642` gateway | **returns real contacts** (the Phase-0 win, end-to-end) |
 | Diffract UI approve-flow | denial → auto-proposed rule → approve → reachable |
 
-## Phase 3 — Live cutover (≈0.5 day, the ONLY destructive step — gated on your go)
+## Phase 3 — Live cutover ✅ DONE (2026-06-10)
+
+**RESULT: cutover complete; ghl-in-chat works on the live box.** 0.0.57 gateway up with the
+gateway-JWT TOML `--config`, hermes sandbox Ready (netns image), enforced egress, providers +
+inference migrated cleanly 0.0.39→0.0.57. The chat agent ran `ghl contacts list` and returned real
+CRM contacts (it returned "No Private Integration Token" on 0.0.39).
+
+**Critical finding the lab missed — credential injection is CREATE-TIME on 0.0.57.** A tool provider
+attached to a *running* sandbox reaches new exec sessions (headless ghl works) but NOT the
+long-running chat daemon — so the provider must be attached **at sandbox create**. The onboard only
+attached messaging/hermes-tool-gateway providers at create, never generic tool providers like ghl.
+Fixed generally (not ghl-specific, per the product directive): `NEMOCLAW_SANDBOX_EXTRA_PROVIDERS`
+(onboard.ts, `00c6fe2`) + `scripts/diffract-tool-sync.sh` (`05b89cd`) which computes the set from
+**registry ∩ providers** and applies each tool's egress — any connected CLI is usable in chat with
+no per-tool code. Gotchas: `docker restart` of a 0.0.57 sandbox breaks the netns (use recreate, not
+restart); `NVIDIA_API_KEY` is env-only (now in `/etc/diffractui.env`); rollback staged at
+`/root/cutover-backup-0057/`.
+
+### Original Phase 3 procedure (for reference)
 
 1. Back up live sandbox state (working files + provider/policy inventory).
 2. Swap `0.0.39 → 0.0.57` on the live box; redeploy from the bumped blueprint.
