@@ -72,8 +72,10 @@ case "$MODE" in
       binargs=(); while IFS= read -r b; do [ -n "$b" ] && binargs+=(--binary "$b"); done < <(tool_binaries "$t")
       while IFS= read -r h; do
         [ -z "$h" ] && continue
-        # registry host is "host:port"; OpenShell endpoint wants "host:port:access"
-        if "$OPENSHELL" policy update "$SANDBOX" --add-endpoint "${h}:full" "${binargs[@]}" --wait >/dev/null 2>&1; then
+        # registry host is "host:port"; OpenShell endpoint wants "host:port:access".
+        # Use the same --rule-name as diffract-tool-connect.sh ("<tool>-api") so a
+        # re-run UPDATES that rule instead of appending a duplicate policy entry.
+        if "$OPENSHELL" policy update "$SANDBOX" --add-endpoint "${h}:full" --rule-name "${t}-api" "${binargs[@]}" --wait >/dev/null 2>&1; then
           echo "[tool-sync] egress allowed: $t -> $h"
         else
           echo "[tool-sync] WARN: failed to apply egress for $t -> $h"
