@@ -78,12 +78,21 @@ $raw  = file_get_contents('php://input');
 $data = json_decode($raw ?: '{}', true);
 if (!is_array($data)) fail(400, ['error' => 'invalid JSON body']);
 
+// Payment-first flow: the workspace + email are collected AFTER payment
+// (signup.html State 2 → api/claim.php). Dodo's hosted checkout collects the
+// customer's email itself, so both are OPTIONAL here. If a workspace IS passed
+// (e.g. a future pre-fill) it is validated and carried through; otherwise the
+// checkout is created for the product alone.
 $workspace = slugify($data['workspace'] ?? '');
 $email     = trim((string)($data['email'] ?? ''));
 $name      = trim((string)($data['name'] ?? ''));
 
-if (!valid_workspace($workspace)) fail(400, ['error' => 'invalid or reserved workspace name']);
-if (!valid_email($email))         fail(400, ['error' => 'invalid email']);
+if ($workspace !== '' && !valid_workspace($workspace)) {
+  fail(400, ['error' => 'invalid or reserved workspace name']);
+}
+if ($email !== '' && !valid_email($email)) {
+  fail(400, ['error' => 'invalid email']);
+}
 
 $key = load_dodo_key();
 if (!$key) {
@@ -92,12 +101,21 @@ if (!$key) {
 
 $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 $host   = $_SERVER['HTTP_HOST'] ?? 'diffraction.in';
-$return = $scheme . '://' . $host . '/signup.html?paid=1&ws=' . rawurlencode($workspace);
+// Return to the post-payment "name your workspace" step. Dodo appends its own
+// identifiers (status / payment id / subscription id) to this URL on redirect;
+// claim.php logs that whole query string to tie the workspace to the payment.
+$return = $scheme . '://' . $host . '/signup.html?paid=1';
+if ($workspace !== '') $return .= '&ws=' . rawurlencode($workspace);
+
+$meta = [];
+if ($workspace !== '') $meta['workspace'] = $workspace;
+if ($email !== '')     $meta['email']     = $email;
+if ($name !== '')      $meta['name']       = $name;
 
 $payload = json_encode([
   'product_cart' => [['product_id' => PRODUCT_ID, 'quantity' => 1]],
   'return_url'   => $return,
-  'metadata'     => ['workspace' => $workspace, 'email' => $email, 'name' => $name],
+  'metadata'     => (object) $meta,   // (object) so empty metadata serializes as {} not []
 ]);
 
 // POST to Dodo. Prefer the curl extension; fall back to a stream context.
