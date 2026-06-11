@@ -183,8 +183,8 @@
         <!-- SUCCESS -->
         <div class="success" id="successState">
           <div class="check"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>
-          <h2>Provisioning your workspace</h2>
-          <p>We're deploying <span class="url" id="successUrl">acme.diffraction.in</span></p>
+          <h2>Payment received — provisioning</h2>
+          <p>Your subscription is active. We're deploying <span class="url" id="successUrl">acme.diffraction.in</span></p>
           <p>You'll get an email with your login the moment it's live — usually a few minutes.</p>
           <p style="margin-top:24px;"><a href="/" class="btn btn-ghost" style="border-color:var(--brushed-titanium);color:var(--satin-frost);">Back to home</a></p>
         </div>
@@ -273,22 +273,32 @@
     var state = refresh();
     if (!state.ok) return;
     var payload = { workspace: state.slug, email: emailInput.value.trim(), name: document.getElementById('name').value.trim() };
-    submitBtn.disabled = true; submitBtn.textContent = 'Creating…';
+    submitBtn.disabled = true; submitBtn.textContent = 'Redirecting to checkout…';
     try {
-      var res = await fetch('/api/signup', {
+      var res = await fetch('/api/checkout', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
       });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      document.getElementById('successUrl').textContent = state.slug + '.diffraction.in';
-      document.getElementById('signupForm').classList.add('hide');
-      document.getElementById('successState').classList.add('show');
+      var data = await res.json().catch(function(){ return {}; });
+      if (!res.ok || !data.url) throw new Error(data.error || ('HTTP ' + res.status));
+      window.location.href = data.url;   // -> Dodo hosted checkout (Rs 2,000/mo)
     } catch (err) {
       submitBtn.disabled = false; submitBtn.textContent = 'Create my workspace →';
-      formError.textContent = "Couldn't reach the server. Please try again, or schedule a call below.";
+      formError.textContent = "Couldn't start checkout (" + (err.message || err) + "). Try again, or schedule a call below.";
     }
   });
 
   refresh();
+
+  /* ── post-payment return: /signup?paid=1&ws=<workspace> → show the confirmation ── */
+  (function(){
+    var q = new URLSearchParams(location.search);
+    if (q.get('paid') === '1') {
+      var ws = slugify(q.get('ws') || '') || 'your-workspace';
+      document.getElementById('successUrl').textContent = ws + '.diffraction.in';
+      document.getElementById('signupForm').classList.add('hide');
+      document.getElementById('successState').classList.add('show');
+    }
+  })();
 </script>
 </body>
 </html>
