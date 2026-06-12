@@ -69,11 +69,15 @@ export default function Dashboard({ sandboxName, onDestroyed }: Props) {
   }
 
   function refreshRules() {
-    fetch(`/api/status?sandbox=${sandboxName}&rules=true`)
+    return fetch(`/api/status?sandbox=${sandboxName}&rules=true`)
       .then((r) => r.json())
       .then((data) => setRulesOutput(data.rules || ""));
   }
 
+  // Rules are re-decidable: openshell honors flipping an already-decided rule, and the
+  // change is reflected in the effective egress policy. So after a click we hold the
+  // button in "loading" until we re-fetch the rules, then clear the per-chunk action
+  // state so the controls render from openshell's real, current status (rule.status).
   function handleRuleAction(chunkId: string, action: "approve" | "reject") {
     setRuleAction((prev) => ({ ...prev, [chunkId]: "loading" }));
     fetch(`/api/rules?sandbox=${sandboxName}&chunkId=${chunkId}&action=${action}`, {
@@ -82,11 +86,15 @@ export default function Dashboard({ sandboxName, onDestroyed }: Props) {
       .then((r) => r.json())
       .then((data) => {
         if (data.success) {
-          setRuleAction((prev) => ({ ...prev, [chunkId]: action === "approve" ? "approved" : "rejected" }));
-          refreshRules();
-        } else {
-          setRuleAction((prev) => ({ ...prev, [chunkId]: "error" }));
+          return refreshRules().finally(() => {
+            setRuleAction((prev) => {
+              const next = { ...prev };
+              delete next[chunkId];
+              return next;
+            });
+          });
         }
+        setRuleAction((prev) => ({ ...prev, [chunkId]: "error" }));
       })
       .catch(() => {
         setRuleAction((prev) => ({ ...prev, [chunkId]: "error" }));
@@ -441,36 +449,42 @@ export default function Dashboard({ sandboxName, onDestroyed }: Props) {
                     </div>
                     <div className="text-xs text-nc-text-dim font-mono truncate">{rule.id}</div>
 
-                    {/* Approve / Reject buttons for pending rules */}
-                    {isPending && (
-                      <div className="flex gap-2 pt-1">
-                        <button
-                          onClick={() => handleRuleAction(rule.id, "approve")}
-                          disabled={actionState === "loading"}
-                          className={`flex-1 py-2 rounded-md text-xs font-medium transition-all ${
-                            actionState === "loading"
-                              ? "bg-nc-border text-nc-text-dim cursor-wait"
-                              : actionState === "approved"
-                              ? "bg-nc-success/20 text-nc-success"
-                              : "bg-nc-success/10 border border-nc-success/30 text-nc-success hover:bg-nc-success/20"
-                          }`}
-                        >
-                          {actionState === "loading" ? "..." : actionState === "approved" ? "Approved" : "Approve"}
-                        </button>
-                        <button
-                          onClick={() => handleRuleAction(rule.id, "reject")}
-                          disabled={actionState === "loading"}
-                          className={`flex-1 py-2 rounded-md text-xs font-medium transition-all ${
-                            actionState === "loading"
-                              ? "bg-nc-border text-nc-text-dim cursor-wait"
-                              : actionState === "rejected"
-                              ? "bg-nc-danger/20 text-nc-danger"
-                              : "bg-nc-danger/10 border border-nc-danger/30 text-nc-danger hover:bg-nc-danger/20"
-                          }`}
-                        >
-                          {actionState === "loading" ? "..." : actionState === "rejected" ? "Rejected" : "Reject"}
-                        </button>
-                      </div>
+                    {/* Approve / Reject — always available so a decision can be changed at
+                        any time (rules are re-decidable; the flip also updates the effective
+                        egress policy). The active side reflects openshell's current status,
+                        refreshed after each click; clicking the other side flips it. */}
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        onClick={() => handleRuleAction(rule.id, "approve")}
+                        disabled={actionState === "loading" || rule.status === "approved"}
+                        aria-pressed={rule.status === "approved"}
+                        className={`flex-1 py-2 rounded-md text-xs font-medium transition-all ${
+                          actionState === "loading"
+                            ? "bg-nc-border text-nc-text-dim cursor-wait"
+                            : rule.status === "approved"
+                            ? "bg-nc-success/20 text-nc-success ring-1 ring-nc-success/40 cursor-default"
+                            : "bg-nc-success/10 border border-nc-success/30 text-nc-success hover:bg-nc-success/20"
+                        }`}
+                      >
+                        {actionState === "loading" ? "..." : rule.status === "approved" ? "✓ Approved" : "Approve"}
+                      </button>
+                      <button
+                        onClick={() => handleRuleAction(rule.id, "reject")}
+                        disabled={actionState === "loading" || rule.status === "rejected"}
+                        aria-pressed={rule.status === "rejected"}
+                        className={`flex-1 py-2 rounded-md text-xs font-medium transition-all ${
+                          actionState === "loading"
+                            ? "bg-nc-border text-nc-text-dim cursor-wait"
+                            : rule.status === "rejected"
+                            ? "bg-nc-danger/20 text-nc-danger ring-1 ring-nc-danger/40 cursor-default"
+                            : "bg-nc-danger/10 border border-nc-danger/30 text-nc-danger hover:bg-nc-danger/20"
+                        }`}
+                      >
+                        {actionState === "loading" ? "..." : rule.status === "rejected" ? "✓ Rejected" : "Reject"}
+                      </button>
+                    </div>
+                    {actionState === "error" && (
+                      <div className="text-xs text-nc-danger pt-1">Action failed — try again.</div>
                     )}
                   </div>
                 );
