@@ -99,8 +99,11 @@ if command -v docker >/dev/null 2>&1; then
   cid="$(docker ps -q -f "label=openshell.ai/sandbox-name=${SANDBOX}" 2>/dev/null | head -1 || true)"
   if [ -n "$cid" ]; then
     echo "[mcp-connect] adding '$NAME' to the running sandbox agent config (exec-immediate)"
-    # `printf` feeds the interactive prompts (no separate auth; enable all tools).
-    docker exec "$cid" bash -lc "printf 'n\ny\n' | hermes mcp add $(printf '%q' "$NAME") --url $(printf '%q' "$URL") >/dev/null 2>&1 || true" </dev/null 2>&1 || true
+    # Run AS THE SANDBOX USER (HOME=/sandbox) so it writes the agent's config, not
+    # root's. `printf` feeds the prompts; add saves it disabled (add-time discovery
+    # sends the literal ${SECRET}), so flip it to enabled. Best-effort — the deploy's
+    # mcp-sync apply re-does this authoritatively at create for the chat daemon.
+    docker exec -u sandbox -e HOME=/sandbox "$cid" bash -lc "printf 'n\ny\n' | hermes mcp add $(printf '%q' "$NAME") --url $(printf '%q' "$URL") >/dev/null 2>&1; sed -i \"/^  ${NAME}:/,/enabled:/ s/enabled: false/enabled: true/\" /sandbox/.hermes/config.yaml 2>/dev/null || true" </dev/null 2>&1 || true
   fi
 fi
 

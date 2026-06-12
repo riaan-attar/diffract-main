@@ -65,10 +65,16 @@ case "$MODE" in
       else
         echo "[mcp-sync] WARN: egress failed for $NAME -> $HOST"; rc=1
       fi
-      # Write mcp_servers into the agent config (placeholder URL). Feeds the
-      # interactive prompts (no separate auth; enable all tools).
-      if "$DOCKER" exec "$cid" bash -lc "printf 'n\ny\n' | hermes mcp add $(printf '%q' "$NAME") --url $(printf '%q' "$URL")" </dev/null >/dev/null 2>&1; then
-        echo "[mcp-sync] configured mcp server: $NAME"
+      # Write mcp_servers into the agent config AS THE SANDBOX USER (HOME=/sandbox)
+      # so it lands in /sandbox/.hermes/config.yaml (the daemon's config), not
+      # root's. `hermes mcp add`'s discovery-connect sends the literal ${SECRET}
+      # (it does NOT interpolate the URL env var at add-time — only the daemon does
+      # at runtime), so it saves the server DISABLED. Flip it to enabled afterward
+      # (scoped to this server's block); the daemon interpolates + connects on load.
+      if "$DOCKER" exec -u sandbox -e HOME=/sandbox "$cid" bash -lc "printf 'n\ny\n' | hermes mcp add $(printf '%q' "$NAME") --url $(printf '%q' "$URL")" </dev/null >/dev/null 2>&1; then
+        "$DOCKER" exec -u sandbox -e HOME=/sandbox "$cid" \
+          bash -lc "sed -i \"/^  ${NAME}:/,/enabled:/ s/enabled: false/enabled: true/\" /sandbox/.hermes/config.yaml" </dev/null >/dev/null 2>&1
+        echo "[mcp-sync] configured + enabled mcp server: $NAME"
         applied=$((applied+1))
       else
         echo "[mcp-sync] WARN: failed to configure mcp server: $NAME"; rc=1
@@ -77,8 +83,10 @@ case "$MODE" in
     # Reload the gateway so the running chat daemon picks up the new mcp_servers
     # (it started at create before this config was written). Best-effort.
     if [ "$applied" -gt 0 ]; then
-      if "$OPENSHELL" sandbox provider list "$SANDBOX" >/dev/null 2>&1; then :; fi
-      nemoclaw "$SANDBOX" hermes recover >/dev/null 2>&1 \
+      # `nemoclaw <sandbox> recover` restarts the gateway + dashboard forward so the
+      # running chat daemon re-reads the config and loads the enabled MCP servers
+      # (it started at create before this config was written).
+      nemoclaw "$SANDBOX" recover >/dev/null 2>&1 \
         && echo "[mcp-sync] reloaded gateway to load MCP tools" \
         || echo "[mcp-sync] WARN: gateway reload failed — MCP tools reach chat on the next recreate"
     fi
