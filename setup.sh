@@ -280,8 +280,21 @@ print_header "Installing OpenShell Runtime"
 if command -v openshell &> /dev/null; then
     print_success "OpenShell is already installed"
 else
-    print_warning "Installing OpenShell..."
-    curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh
+    # Pin the bootstrap install to the blueprint's max_openshell_version — the SAME
+    # single source of truth NemoClaw onboard enforces (nemoclaw-blueprint/blueprint.yaml)
+    # — instead of pulling upstream "latest". This stops a fresh VPS from landing on a
+    # newer, untested OpenShell that onboard would then have to reinstall, and is the one
+    # genuinely-unpinned spot in the deploy. Reads the pin (no second source of truth);
+    # falls back to upstream-latest only if the blueprint can't be read.
+    _OS_BLUEPRINT="NemoClaw/nemoclaw-blueprint/blueprint.yaml"
+    _OS_PIN="$(grep -oE 'max_openshell_version:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' "$_OS_BLUEPRINT" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+    if [ -n "$_OS_PIN" ]; then
+        print_warning "Installing OpenShell v${_OS_PIN} (pinned to blueprint max_openshell_version)..."
+        curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | OPENSHELL_VERSION="v${_OS_PIN}" sh
+    else
+        print_warning "Installing OpenShell (latest — blueprint pin not found)..."
+        curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh
+    fi
     source ~/.bashrc 2>/dev/null || true
     print_success "OpenShell installed successfully"
 fi
