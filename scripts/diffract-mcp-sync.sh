@@ -3,14 +3,15 @@
 # Diffract MCP sync — makes every connected MCP server usable by the CHAT agent,
 # driven entirely by the host-side connection records (no per-server code).
 #
-# WHY THIS EXISTS (same reason as diffract-tool-sync.sh): OpenShell >= 0.0.57
-# injects a provider's credential into the long-running agent daemon ONLY at
-# sandbox CREATE. So for an MCP server's token-placeholder to resolve in CHAT,
-# its provider must be attached at create. And the agent's config (mcp_servers)
-# lives in the ephemeral sandbox, wiped on recreate — so it must be re-applied at
-# each deploy. Both are derived from the records written by diffract-mcp-connect.sh.
+# MODEL (token-in-Hermes, by operator choice): the real secret is written
+# directly into the agent config (mcp_servers). We do NOT register OpenShell
+# providers; we keep ONLY the egress allowlist so the agent can reach the host.
 #
-#   diffract-mcp-sync.sh providers          # -> comma list for NEMOCLAW_SANDBOX_EXTRA_PROVIDERS (attach at create)
+# The agent config lives in the ephemeral sandbox (wiped on recreate), so it is
+# re-applied at each deploy from the records written by diffract-mcp-connect.sh:
+#
+#   diffract-mcp-sync.sh providers          # -> EMPTY (no OpenShell providers in this model)
+#   diffract-mcp-sync.sh config             # -> mcp_servers JSON (real tokens) for NEMOCLAW_MCP_SERVERS_B64 at create
 #   diffract-mcp-sync.sh apply [<sandbox>]  # re-apply egress + mcp_servers config + reload (post-create)
 #   diffract-mcp-sync.sh list               # human-readable: connected MCP servers
 # ─────────────────────────────────────────────────────────────────────────
@@ -24,32 +25,25 @@ MCP_BINARIES=(/usr/bin/python3.13 /opt/hermes/.venv/bin/python3.13 /opt/hermes/.
 
 records() { ls "$RECORD_DIR"/*.conf 2>/dev/null; }
 
-# Source a record file in a subshell and echo
-# "NAME|URL|SECRET_ENV|HOST|PROVIDER|HEADER". HEADER is the optional request-header
-# name for header-auth MCP servers (empty for URL-token servers).
+# Source a record file in a subshell and echo "NAME|URL|SECRET|HOST|HEADER".
+# URL carries the real token for URL-token servers; HEADER+SECRET carry the
+# header name + real value for header-auth servers.
 record_fields() {
-  ( set -e; NAME=; URL=; SECRET_ENV=; HOST=; PROVIDER=; HEADER=; . "$1"
-    printf '%s|%s|%s|%s|%s|%s\n' "$NAME" "$URL" "$SECRET_ENV" "$HOST" "$PROVIDER" "$HEADER" )
+  ( set -e; NAME=; URL=; SECRET=; HOST=; HEADER=; . "$1"
+    printf '%s|%s|%s|%s|%s\n' "$NAME" "$URL" "$SECRET" "$HOST" "$HEADER" )
 }
 
 sandbox_cid() { "$DOCKER" ps -q -f "label=openshell.ai/sandbox-name=${SANDBOX}" 2>/dev/null | head -1; }
 
 case "$MODE" in
   providers)
-    # Comma-separated MCP provider names for the onboard to attach at create.
-    out=""
-    for f in $(records); do
-      p="$(record_fields "$f" | cut -d'|' -f5)"
-      [ -n "$p" ] && out="${out:+$out,}$p"
-    done
-    echo "$out"
+    # Token-in-Hermes model registers no OpenShell providers.
+    echo ""
     ;;
 
   apply)
     # Re-apply each server to the freshly-created sandbox: egress + mcp_servers
-    # config. Exit non-zero if any server failed so the deploy route can surface
-    # it. The provider is attached at create (see `providers`), so the daemon env
-    # already holds the placeholder when the config is written.
+    # config (with the real token). Exit non-zero if any server failed.
     rc=0
     cid="$(sandbox_cid)"
     if [ -z "$cid" ]; then
@@ -58,7 +52,7 @@ case "$MODE" in
     fi
     applied=0
     for f in $(records); do
-      IFS='|' read -r NAME URL SECRET_ENV HOST PROVIDER HEADER < <(record_fields "$f")
+      IFS='|' read -r NAME URL SECRET HOST HEADER < <(record_fields "$f")
       [ -z "$NAME" ] && continue
       # Egress (idempotent: same --rule-name updates instead of duplicating).
       binargs=(); for b in "${MCP_BINARIES[@]}"; do binargs+=(--binary "$b"); done
@@ -67,16 +61,10 @@ case "$MODE" in
       else
         echo "[mcp-sync] WARN: egress failed for $NAME -> $HOST"; rc=1
       fi
-      # Write mcp_servers into the agent config AS THE SANDBOX USER (HOME=/sandbox)
-      # so it lands in /sandbox/.hermes/config.yaml (the daemon's config), not root's.
-      ok=0
-      if [ -n "$HEADER" ]; then
-        # Header-auth server: write {url, headers:{<HEADER>:"${SECRET_ENV}"}, enabled:true}
-        # directly (hermes mcp add has no header flags). The loader interpolates
-        # ${SECRET_ENV} -> the OpenShell placeholder; the L7 proxy rewrites it at egress.
-        if "$DOCKER" exec -u sandbox -e HOME=/sandbox \
-            -e MNAME="$NAME" -e MURL="$URL" -e MHEADER="$HEADER" -e MSECRET="$SECRET_ENV" "$cid" \
-            /opt/hermes/.venv/bin/python - <<'PY' </dev/null >/dev/null 2>&1
+      # Write mcp_servers (REAL token) into the agent config AS THE SANDBOX USER.
+      if "$DOCKER" exec -i -u sandbox -e HOME=/sandbox \
+          -e MNAME="$NAME" -e MURL="$URL" -e MHEADER="$HEADER" -e MSECRET="$SECRET" "$cid" \
+          /opt/hermes/.venv/bin/python - <<'PY' </dev/null >/dev/null 2>&1
 import os
 from ruamel.yaml import YAML
 p = "/sandbox/.hermes/config.yaml"
@@ -86,37 +74,22 @@ try:
         cfg = yaml.load(f) or {}
 except Exception:
     cfg = {}
-cfg.setdefault("mcp_servers", {})[os.environ["MNAME"]] = {
-    "url": os.environ["MURL"],
-    "headers": {os.environ["MHEADER"]: "${" + os.environ["MSECRET"] + "}"},
-    "enabled": True,
-}
+entry = {"url": os.environ["MURL"], "enabled": True}
+if os.environ.get("MHEADER"):
+    entry["headers"] = {os.environ["MHEADER"]: os.environ["MSECRET"]}
+cfg.setdefault("mcp_servers", {})[os.environ["MNAME"]] = entry
 with open(p, "w") as f:
     yaml.dump(cfg, f)
 PY
-        then ok=1; fi
-      else
-        # URL-token server: `hermes mcp add` saves it DISABLED (add-time discovery
-        # sends the literal ${SECRET}); flip it to enabled (scoped to this block).
-        if "$DOCKER" exec -u sandbox -e HOME=/sandbox "$cid" bash -lc "printf 'n\ny\n' | hermes mcp add $(printf '%q' "$NAME") --url $(printf '%q' "$URL")" </dev/null >/dev/null 2>&1; then
-          "$DOCKER" exec -u sandbox -e HOME=/sandbox "$cid" \
-            bash -lc "sed -i \"/^  ${NAME}:/,/enabled:/ s/enabled: false/enabled: true/\" /sandbox/.hermes/config.yaml" </dev/null >/dev/null 2>&1
-          ok=1
-        fi
-      fi
-      if [ "$ok" -eq 1 ]; then
+      then
         echo "[mcp-sync] configured + enabled mcp server: $NAME"
         applied=$((applied+1))
       else
         echo "[mcp-sync] WARN: failed to configure mcp server: $NAME"; rc=1
       fi
     done
-    # Reload the gateway so the running chat daemon picks up the new mcp_servers
-    # (it started at create before this config was written). Best-effort.
+    # Reload the gateway so the running chat daemon re-reads mcp_servers.
     if [ "$applied" -gt 0 ]; then
-      # `nemoclaw <sandbox> recover` restarts the gateway + dashboard forward so the
-      # running chat daemon re-reads the config and loads the enabled MCP servers
-      # (it started at create before this config was written).
       nemoclaw "$SANDBOX" recover >/dev/null 2>&1 \
         && echo "[mcp-sync] reloaded gateway to load MCP tools" \
         || echo "[mcp-sync] WARN: gateway reload failed — MCP tools reach chat on the next recreate"
@@ -125,23 +98,19 @@ PY
     ;;
 
   config)
-    # Emit mcp_servers as JSON ({name:{url,enabled:true}}) for CREATE-TIME
-    # injection: the deploy route base64-encodes this into NEMOCLAW_MCP_SERVERS_B64
-    # so generate-config writes mcp_servers into the agent config at build time and
-    # the chat daemon connects at a clean startup. URLs hold ${SECRET_ENV}
-    # placeholders (the token lives in the OpenShell provider attached at create).
+    # Emit mcp_servers JSON for CREATE-TIME injection (NEMOCLAW_MCP_SERVERS_B64).
+    # Holds the REAL token (URL-token in the URL; header servers as headers map).
     if ! command -v jq >/dev/null 2>&1; then echo "{}"; exit 0; fi
     printf '{'
     first=1
     for f in $(records); do
-      IFS='|' read -r NAME URL SECRET_ENV HOST PROVIDER HEADER < <(record_fields "$f")
+      IFS='|' read -r NAME URL SECRET HOST HEADER < <(record_fields "$f")
       [ -z "$NAME" ] && continue
       [ $first -eq 0 ] && printf ','; first=0
       if [ -n "$HEADER" ]; then
-        # Header-auth: emit {url, headers:{<HEADER>:"${SECRET_ENV}"}, enabled:true}.
         printf '%s:{"url":%s,"headers":{%s:%s},"enabled":true}' \
           "$(jq -nc --arg v "$NAME" '$v')" "$(jq -nc --arg v "$URL" '$v')" \
-          "$(jq -nc --arg v "$HEADER" '$v')" "$(jq -nc --arg v "\${${SECRET_ENV}}" '$v')"
+          "$(jq -nc --arg v "$HEADER" '$v')" "$(jq -nc --arg v "$SECRET" '$v')"
       else
         printf '%s:{"url":%s,"enabled":true}' "$(jq -nc --arg v "$NAME" '$v')" "$(jq -nc --arg v "$URL" '$v')"
       fi
@@ -151,8 +120,8 @@ PY
 
   list)
     for f in $(records); do
-      IFS='|' read -r NAME URL SECRET_ENV HOST PROVIDER HEADER < <(record_fields "$f")
-      echo "mcp: $NAME  host=$HOST  provider=$PROVIDER  secret_env=$SECRET_ENV${HEADER:+  header=$HEADER}"
+      IFS='|' read -r NAME URL SECRET HOST HEADER < <(record_fields "$f")
+      echo "mcp: $NAME  host=$HOST${HEADER:+  header=$HEADER}  (token-in-hermes)"
     done
     ;;
 

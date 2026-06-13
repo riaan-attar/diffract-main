@@ -10,12 +10,14 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 // ─────────────────────────────────────────────────────────────────────────
 // MCP API — connect an MCP server (Zapier, Notion, …) to the Hermes agent.
 //
-// SECURITY MODEL (same as api/tools/route.ts): admin-session gated; the server's
-// secret (the token embedded in its URL) is extracted here, passed to the connect
-// script ONLY via the child env (never argv, never logged, never returned), and
-// stored host-side in an OpenShell provider. The URL persisted in the agent config
-// holds only a `${SECRET_ENV}` placeholder; the L7 proxy substitutes the real
-// value at egress. execFile uses argv arrays (no shell).
+// MODEL (token-in-Hermes, operator-selected): admin-session gated; the server's
+// secret is extracted here and passed to the connect script ONLY via the child
+// env (never argv, never logged, never returned). The connect script writes the
+// REAL token directly into the Hermes mcp_servers config and keeps ONLY the
+// OpenShell egress allowlist (required so the sandbox can reach the MCP host —
+// egress is deny-by-default). No OpenShell secret-provider / placeholder rewrite.
+// Tradeoff: the secret lives in the sandbox config + a root-only host record.
+// execFile uses argv arrays (no shell).
 // ─────────────────────────────────────────────────────────────────────────
 
 const execFileAsync = promisify(execFile);

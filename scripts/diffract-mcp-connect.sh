@@ -1,29 +1,30 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────
-# Diffract MCP connector — securely connect an MCP server (Zapier, Notion, …)
-# to the Hermes agent so it can use the server's tools WITHOUT ever holding the
-# server's secret.
+# Diffract MCP connector — connect an MCP server (Zapier, Stitch, Notion, …)
+# to the Hermes agent.
 #
-# Same security model as diffract-tool-connect.sh, applied to MCP:
-#   1. The server's secret (e.g. the token in a Zapier `?token=…` URL) is stored
-#      in an OpenShell `generic` provider, keyed by <SECRET_ENV>. The sandbox only
-#      ever sees a PLACEHOLDER (openshell:resolve:env:<SECRET_ENV>); the L7 proxy
-#      substitutes the real value at egress (headers AND query params). The agent
-#      never holds the secret, and it never lands in the sandbox config or backups.
-#   2. The mcp_servers URL stored in the agent config uses ${SECRET_ENV}, which
-#      Hermes interpolates to the placeholder at runtime — proven: the proxy then
-#      swaps in the real token and the server authenticates.
-#   3. Egress is allowed ONLY to the MCP host, attributed to the agent's python
-#      binary (and curl), so the agent can reach the server and nothing else.
+# MODEL (token-in-Hermes, by operator choice): the server's secret is written
+# DIRECTLY into the Hermes agent config (mcp_servers) — no OpenShell provider,
+# no ${PLACEHOLDER} rewriting. We keep ONLY the egress allowlist so the agent
+# can reach the MCP host (OpenShell denies all non-allowlisted egress, so this
+# is required for connectivity).
+#
+#   • URL-token servers (Zapier `?token=…`): the real token rides in the URL.
+#   • Header-auth servers (Stitch `X-Goog-Api-Key`): the real key rides in a
+#     request header.
+#
+# TRADEOFF (accepted): the real secret now lives inside the sandbox config and
+# in the host-side record below (root-only, mode 600). It is no longer kept
+# host-side-only behind the L7 proxy. This is the operator-selected behaviour.
 #
 # The SECRET VALUE is read from THIS PROCESS'S ENVIRONMENT (never argv), so it
-# never appears in the process list. Set it before calling:
+# never appears in the process list:
 #
 #   ZAPIER_MCP_TOKEN=xxx diffract-mcp-connect.sh test zapier \
 #       'https://mcp.zapier.com/api/v1/connect?token=${ZAPIER_MCP_TOKEN}' \
 #       ZAPIER_MCP_TOKEN mcp.zapier.com:443
 #
-# Usage: diffract-mcp-connect.sh <sandbox> <name> <url-with-placeholder> <secretEnv> <host:port>
+# Usage: diffract-mcp-connect.sh <sandbox> <name> <url[-with-placeholder]> <secretEnv> <host:port> [headerName]
 # ─────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -33,12 +34,10 @@ URL="${3:-}"
 SECRET_ENV="${4:-}"
 HOSTPORT="${5:-}"
 # Optional 6th arg: a request-header NAME (e.g. X-Goog-Api-Key) for header-auth
-# MCP servers (Stitch, etc.). When set, the secret is injected via this header
-# instead of a URL token; the agent config gets headers:{<HEADER>: "${SECRET_ENV}"}
-# and the L7 proxy rewrites the placeholder to the real key at egress.
+# MCP servers. When set, the secret is injected via this header; otherwise the
+# secret is expected as a ${SECRET_ENV} placeholder embedded in the URL.
 HEADER="${6:-}"
 
-PROVIDER="${NAME}-mcp"
 RECORD_DIR="${DIFFRACT_MCP_DIR:-/var/lib/diffract/connected-mcp.d}"
 OPENSHELL="${OPENSHELL_PATH:-openshell}"
 # Binaries that may open the MCP connection from inside the sandbox: the Hermes
@@ -47,33 +46,26 @@ OPENSHELL="${OPENSHELL_PATH:-openshell}"
 MCP_BINARIES=(/usr/bin/python3.13 /opt/hermes/.venv/bin/python3.13 /opt/hermes/.venv/bin/python3 /opt/hermes/.venv/bin/python /usr/bin/curl)
 
 if [ -z "$SANDBOX" ] || [ -z "$NAME" ] || [ -z "$URL" ] || [ -z "$SECRET_ENV" ] || [ -z "$HOSTPORT" ]; then
-  echo "usage: diffract-mcp-connect.sh <sandbox> <name> <url-with-placeholder> <secretEnv> <host:port>" >&2
+  echo "usage: diffract-mcp-connect.sh <sandbox> <name> <url[-with-placeholder]> <secretEnv> <host:port> [headerName]" >&2
   exit 2
 fi
 
 # The secret value must be in the environment under $SECRET_ENV.
-if [ -z "${!SECRET_ENV:-}" ]; then
+SECRET="$(printenv "$SECRET_ENV" || true)"
+if [ -z "$SECRET" ]; then
   echo "[mcp-connect] missing secret in environment: $SECRET_ENV" >&2
   echo "[mcp-connect] re-run with: ${SECRET_ENV}=<value> diffract-mcp-connect.sh $SANDBOX $NAME ..." >&2
   exit 1
 fi
 
-# 1. Register the provider holding the real secret (sandbox sees a placeholder).
-#    --credential KEY reads the value from THIS process's env (never argv).
-echo "[mcp-connect] registering provider '$PROVIDER' (generic) with: $SECRET_ENV"
-if "$OPENSHELL" provider get "$PROVIDER" >/dev/null 2>&1; then
-  "$OPENSHELL" provider update "$PROVIDER" --credential "$SECRET_ENV" >/dev/null
-else
-  "$OPENSHELL" provider create --name "$PROVIDER" --type generic --credential "$SECRET_ENV" >/dev/null
-fi
+# Resolve the REAL url: substitute the placeholder ${SECRET_ENV} with the real
+# secret (URL-token servers). Header servers pass a clean URL (no placeholder),
+# so this leaves it untouched.
+REAL_URL="${URL//\$\{$SECRET_ENV\}/$SECRET}"
 
-# 2. Attach to the sandbox (detach+attach forces re-injection of the placeholder
-#    into new exec sessions; for the CHAT daemon it binds at the next create).
-echo "[mcp-connect] attaching provider '$PROVIDER' to sandbox '$SANDBOX'"
-"$OPENSHELL" sandbox provider detach "$SANDBOX" "$PROVIDER" >/dev/null 2>&1 || true
-"$OPENSHELL" sandbox provider attach "$SANDBOX" "$PROVIDER" >/dev/null
-
-# 3. Allow egress to ONLY the MCP host, attributed to the agent's binaries.
+# 1. Allow egress to ONLY the MCP host, attributed to the agent's binaries.
+#    This is the one OpenShell touchpoint we keep: without it the sandbox cannot
+#    reach the MCP host at all (deny-by-default egress).
 echo "[mcp-connect] allowing egress to: $HOSTPORT"
 bin_args=()
 for b in "${MCP_BINARIES[@]}"; do bin_args+=(--binary "$b"); done
@@ -83,36 +75,38 @@ for b in "${MCP_BINARIES[@]}"; do bin_args+=(--binary "$b"); done
   "${bin_args[@]}" --wait >/dev/null
 echo "[mcp-connect]   allowed ${HOSTPORT}"
 
-# 4. Record the connection host-side (survives recreate; re-applied at create by
-#    diffract-mcp-sync.sh). Stored as a shell-sourceable file. The URL holds the
-#    PLACEHOLDER (${SECRET_ENV}), never the real token.
+# 2. Best-effort: drop any legacy OpenShell provider from the old (placeholder)
+#    model so it is not re-attached on future deploys.
+if "$OPENSHELL" provider get "${NAME}-mcp" >/dev/null 2>&1; then
+  "$OPENSHELL" sandbox provider detach "$SANDBOX" "${NAME}-mcp" >/dev/null 2>&1 || true
+  "$OPENSHELL" provider delete "${NAME}-mcp" >/dev/null 2>&1 || true
+  echo "[mcp-connect] removed legacy OpenShell provider '${NAME}-mcp' (token now lives in Hermes)"
+fi
+
+# 3. Record the connection host-side (root-only; survives recreate; re-applied at
+#    create by diffract-mcp-sync.sh). Holds the REAL secret — chmod 600 via umask.
+#    HEADER set => header-auth (URL clean, SECRET is the header value).
+#    HEADER empty => URL-token (REAL_URL already carries the token).
 mkdir -p "$RECORD_DIR"
 umask 077
 cat > "$RECORD_DIR/${NAME}.conf" <<EOF
 NAME=$(printf '%q' "$NAME")
-URL=$(printf '%q' "$URL")
-SECRET_ENV=$(printf '%q' "$SECRET_ENV")
+URL=$(printf '%q' "$REAL_URL")
+SECRET=$(printf '%q' "$SECRET")
 HOST=$(printf '%q' "$HOSTPORT")
-PROVIDER=$(printf '%q' "$PROVIDER")
 HEADER=$(printf '%q' "$HEADER")
 EOF
 echo "[mcp-connect] recorded '$NAME' in $RECORD_DIR/${NAME}.conf (re-applied at next create)"
 
-# 5. Best-effort: add the server to the RUNNING sandbox's agent config so it's
-#    usable in new exec sessions immediately. The CHAT daemon binds the provider
-#    env at create, so chat picks it up on the next deploy/recreate (see note).
+# 4. Write the server into the RUNNING sandbox's agent config with the REAL token,
+#    AS THE SANDBOX USER (HOME=/sandbox) so it lands in /sandbox/.hermes/config.yaml.
 if command -v docker >/dev/null 2>&1; then
   cid="$(docker ps -q -f "label=openshell.ai/sandbox-name=${SANDBOX}" 2>/dev/null | head -1 || true)"
   if [ -n "$cid" ]; then
-    if [ -n "$HEADER" ]; then
-      # Header-auth: write mcp_servers.<name> = {url, headers:{<HEADER>:"${SECRET_ENV}"},
-      # enabled:true} directly (hermes mcp add has no header flags). The config
-      # loader interpolates ${SECRET_ENV} -> the OpenShell placeholder, which the
-      # L7 proxy rewrites to the real key at egress. Run as the sandbox user.
-      echo "[mcp-connect] adding header-auth '$NAME' (header: $HEADER) to the running sandbox agent config"
-      docker exec -u sandbox -e HOME=/sandbox \
-        -e MNAME="$NAME" -e MURL="$URL" -e MHEADER="$HEADER" -e MSECRET="$SECRET_ENV" "$cid" \
-        /opt/hermes/.venv/bin/python - <<'PY' >/dev/null 2>&1 || true
+    echo "[mcp-connect] adding '$NAME' to the running sandbox agent config"
+    docker exec -i -u sandbox -e HOME=/sandbox \
+      -e MNAME="$NAME" -e MURL="$REAL_URL" -e MHEADER="$HEADER" -e MSECRET="$SECRET" "$cid" \
+      /opt/hermes/.venv/bin/python - <<'PY' >/dev/null 2>&1 || true
 import os
 from ruamel.yaml import YAML
 p = "/sandbox/.hermes/config.yaml"
@@ -122,24 +116,15 @@ try:
         cfg = yaml.load(f) or {}
 except Exception:
     cfg = {}
-cfg.setdefault("mcp_servers", {})[os.environ["MNAME"]] = {
-    "url": os.environ["MURL"],
-    "headers": {os.environ["MHEADER"]: "${" + os.environ["MSECRET"] + "}"},
-    "enabled": True,
-}
+entry = {"url": os.environ["MURL"], "enabled": True}
+if os.environ.get("MHEADER"):
+    entry["headers"] = {os.environ["MHEADER"]: os.environ["MSECRET"]}
+cfg.setdefault("mcp_servers", {})[os.environ["MNAME"]] = entry
 with open(p, "w") as f:
     yaml.dump(cfg, f)
 PY
-    else
-      echo "[mcp-connect] adding '$NAME' to the running sandbox agent config (exec-immediate)"
-      # Run AS THE SANDBOX USER (HOME=/sandbox) so it writes the agent's config, not
-      # root's. `printf` feeds the prompts; add saves it disabled (add-time discovery
-      # sends the literal ${SECRET}), so flip it to enabled. Best-effort — the deploy's
-      # mcp-sync apply re-does this authoritatively at create for the chat daemon.
-      docker exec -u sandbox -e HOME=/sandbox "$cid" bash -lc "printf 'n\ny\n' | hermes mcp add $(printf '%q' "$NAME") --url $(printf '%q' "$URL") >/dev/null 2>&1; sed -i \"/^  ${NAME}:/,/enabled:/ s/enabled: false/enabled: true/\" /sandbox/.hermes/config.yaml 2>/dev/null || true" </dev/null 2>&1 || true
-    fi
   fi
 fi
 
-echo "[mcp-connect] done — '$NAME' is wired to sandbox '$SANDBOX'. The secret stays host-side;"
-echo "[mcp-connect] the agent sees only a placeholder. Recreate the sandbox (deploy) to use it in chat."
+echo "[mcp-connect] done — '$NAME' is wired to sandbox '$SANDBOX'."
+echo "[mcp-connect] Recreate the sandbox (deploy) to use it in chat."
