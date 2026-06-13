@@ -25,7 +25,11 @@ const execFileAsync = promisify(execFile);
 const SANDBOX_NAME_RE = /^[a-zA-Z0-9_-]+$/;
 const TOOL_NAME_RE = /^[a-z][a-z0-9-]{0,40}$/;
 const BIN_RE = /^[a-z][a-z0-9-]{0,40}$/;
-const KEY_RE = /^[A-Z][A-Z0-9_]*$/;
+// Credential/config key. Allow simple text: letters (any case), digits,
+// underscore and hyphen — e.g. API_KEY, api_key, or x-api-key. Still no shell
+// metacharacters, so it stays injection-safe; the connect script reads values
+// via printenv (handles hyphens/lowercase), not bash $VAR expansion.
+const KEY_RE = /^[A-Za-z][A-Za-z0-9_-]*$/;
 const HOST_RE = /^[a-z0-9.-]+:[0-9]{1,5}$/;
 const ENTRY_RE = /^[a-zA-Z0-9._/-]{1,120}$/;
 const REPO_RE = /^https:\/\/[a-zA-Z0-9._/-]+\.git$/;
@@ -147,7 +151,7 @@ export async function POST(req: Request): Promise<Response> {
     // curl; the secret is held host-side and injected at egress (the sandbox
     // only sees a placeholder), so this never bakes a binary.
     if (!(t.apiHosts && t.apiHosts.length)) errs.push("apiHosts (at least one host:port)");
-    if (!t.secretEnv || !KEY_RE.test(t.secretEnv)) errs.push("secretEnv key (UPPER_SNAKE)");
+    if (!t.secretEnv || !KEY_RE.test(t.secretEnv)) errs.push("secretEnv key (letters/digits/_/-, start with a letter)");
     if (!t.authHeader || !AUTH_HEADER_RE.test(t.authHeader.trim()))
       errs.push("authHeader (e.g. 'Authorization: Bearer' or 'x-api-key:')");
     let baseHost = "";
@@ -173,7 +177,7 @@ export async function POST(req: Request): Promise<Response> {
     const noCtrl = (s?: string) => !s || !/[\t\n\r]/.test(s); // build/patch are 1-line
     if (!noCtrl(t.build)) errs.push("build (no tabs/newlines)");
     if (!noCtrl(t.patch)) errs.push("patch (no tabs/newlines)");
-    if (t.secretEnv && !KEY_RE.test(t.secretEnv)) errs.push("secretEnv key (UPPER_SNAKE)");
+    if (t.secretEnv && !KEY_RE.test(t.secretEnv)) errs.push("secretEnv key (letters/digits/_/-, start with a letter)");
   }
   if (errs.length) {
     return Response.json({ error: "Invalid: " + errs.join(", ") }, { status: 400 });

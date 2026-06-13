@@ -108,6 +108,7 @@ export default function ToolsTab({ sandboxName }: { sandboxName: string }) {
   const [creds, setCreds] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ tool: string; ok: boolean; msg: string } | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
 
   // Add-tool form + install job
   const [showAdd, setShowAdd] = useState(false);
@@ -197,6 +198,28 @@ export default function ToolsTab({ sandboxName }: { sandboxName: string }) {
       setResult({ tool: t.name, ok: false, msg: (e as Error).message || "Connect failed" });
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function removeTool(t: Tool) {
+    if (!confirm(`Remove tool "${t.name}"? This deletes it from the registry and uninstalls it from the sandbox.`)) {
+      return;
+    }
+    setRemoving(t.name);
+    setResult(null);
+    try {
+      const r = await fetch(
+        `/api/tools?sandbox=${encodeURIComponent(sandboxName)}&tool=${encodeURIComponent(t.name)}`,
+        { method: "DELETE" },
+      );
+      const data = await r.json();
+      if (!r.ok || !data.ok) throw new Error(data.error || "Remove failed");
+      if (openTool === t.name) setOpenTool(null);
+      load();
+    } catch (e) {
+      setResult({ tool: t.name, ok: false, msg: (e as Error).message || "Remove failed" });
+    } finally {
+      setRemoving(null);
     }
   }
 
@@ -440,7 +463,7 @@ export default function ToolsTab({ sandboxName }: { sandboxName: string }) {
                   <div />
                 )}
               </div>
-              <Field label="Secret env var *" value={restForm.secretEnv} onChange={(v) => setRestForm({ ...restForm, secretEnv: v })} placeholder="PIPEDRIVE_TOKEN" hint="UPPER_SNAKE — the name the key is referenced by" />
+              <Field label="Secret env var *" value={restForm.secretEnv} onChange={(v) => setRestForm({ ...restForm, secretEnv: v })} placeholder="PIPEDRIVE_TOKEN or pipedrive-token" hint="letters/digits/_/- (e.g. API_KEY, api_key, x-api-key) — the name the key is referenced by" />
               <label className="block">
                 <span className="text-nc-text-dim text-xs">API token / key *</span>
                 <input
@@ -512,7 +535,7 @@ export default function ToolsTab({ sandboxName }: { sandboxName: string }) {
                 <Field label="Ref" value={form.ref} onChange={(v) => setForm({ ...form, ref: v })} placeholder="main" />
                 <Field label="Entry *" value={form.entry} onChange={(v) => setForm({ ...form, entry: v })} hint="path run by the bin, e.g. dist/index.js" />
                 <Field label="API host(s)" value={form.apiHosts} onChange={(v) => setForm({ ...form, apiHosts: v })} placeholder="api.example.com:443" hint="comma-separated host:port" />
-                <Field label="Secret env key" value={form.secretEnv} onChange={(v) => setForm({ ...form, secretEnv: v })} placeholder="EXAMPLE_TOKEN" hint="UPPER_SNAKE (the secret)" />
+                <Field label="Secret env key" value={form.secretEnv} onChange={(v) => setForm({ ...form, secretEnv: v })} placeholder="API_KEY or api-key" hint="letters/digits/_/- (e.g. API_KEY, api_key, x-api-key)" />
                 <Field label="Config env key(s)" value={form.configEnv} onChange={(v) => setForm({ ...form, configEnv: v })} placeholder="EXAMPLE_REGION" hint="comma-separated, non-secret" />
               </div>
               <Field label="Build command" value={form.build} onChange={(v) => setForm({ ...form, build: v })} hint="runs in the cloned tool dir, in the sandbox" />
@@ -610,13 +633,23 @@ export default function ToolsTab({ sandboxName }: { sandboxName: string }) {
                     <Badge ok={t.status.egress} label="Egress" />
                   </div>
                 </div>
-                <button
-                  disabled={!running || (t.secretKeys.length === 0 && t.configKeys.length === 0)}
-                  onClick={() => (openTool === t.name ? setOpenTool(null) : startConnect(t))}
-                  className="shrink-0 rounded bg-nc-green/15 px-3 py-1.5 text-xs text-nc-green hover:bg-nc-green/25 disabled:opacity-40"
-                >
-                  {t.status.connected ? "Reconnect" : "Connect"}
-                </button>
+                <div className="shrink-0 flex items-center gap-2">
+                  <button
+                    disabled={!running || (t.secretKeys.length === 0 && t.configKeys.length === 0)}
+                    onClick={() => (openTool === t.name ? setOpenTool(null) : startConnect(t))}
+                    className="rounded bg-nc-green/15 px-3 py-1.5 text-xs text-nc-green hover:bg-nc-green/25 disabled:opacity-40"
+                  >
+                    {t.status.connected ? "Reconnect" : "Connect"}
+                  </button>
+                  <button
+                    disabled={removing === t.name}
+                    onClick={() => removeTool(t)}
+                    title="Remove this tool from the registry and the sandbox"
+                    className="rounded bg-nc-danger/10 px-3 py-1.5 text-xs text-nc-danger hover:bg-nc-danger/20 disabled:opacity-40"
+                  >
+                    {removing === t.name ? "Removing…" : "Remove"}
+                  </button>
+                </div>
               </div>
 
               {openTool === t.name && (

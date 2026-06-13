@@ -28,7 +28,11 @@ const execFileAsync = promisify(execFile);
 const DOCKER = process.env.DOCKER_PATH || "docker";
 const OPENSHELL = process.env.OPENSHELL_PATH || "openshell";
 const SANDBOX_NAME_RE = /^[a-zA-Z0-9_-]+$/;
-const KEY_RE = /^[A-Z][A-Z0-9_]*$/; // credential/config env keys
+const TOOL_NAME_RE = /^[a-z][a-z0-9-]{0,40}$/;
+// credential/config env keys — letters (any case), digits, underscore, hyphen
+// (e.g. API_KEY, api_key, x-api-key). Injection-safe; values are read via
+// printenv downstream so hyphenated/lowercase names work end-to-end.
+const KEY_RE = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
 type RegistryTool = {
   name: string;
@@ -282,4 +286,75 @@ export async function POST(req: Request): Promise<Response> {
     const out = clean(`${err?.stdout || ""}\n${err?.stderr || err?.message || "connect failed"}`).trim();
     return Response.json({ ok: false, error: out }, { status: 500 });
   }
+}
+
+// ── DELETE: remove a tool (registry entry + best-effort live cleanup) ─────
+// The registry removal is the durable part (the tool won't re-bake on the next
+// recreate). Live cleanup (symlink/dir/skill + host provider) is best-effort and
+// never fails the request. execFile uses argv arrays + no shell; the tool name
+// is regex-validated and the install paths are derived from the registry entry.
+export async function DELETE(req: Request): Promise<Response> {
+  const unauth = await requireSession();
+  if (unauth) return unauth;
+
+  const { searchParams } = new URL(req.url);
+  const sandbox = searchParams.get("sandbox") || "";
+  const toolName = searchParams.get("tool") || "";
+  if (!SANDBOX_NAME_RE.test(sandbox)) {
+    return Response.json({ error: "Invalid sandbox name" }, { status: 400 });
+  }
+  if (!TOOL_NAME_RE.test(toolName)) {
+    return Response.json({ error: "Invalid tool name" }, { status: 400 });
+  }
+
+  const p = await registryPath();
+  if (!p) return Response.json({ error: "Tool registry not found" }, { status: 500 });
+
+  let reg: { tools?: RegistryTool[] } & Record<string, unknown>;
+  try {
+    reg = JSON.parse(await fs.readFile(p, "utf8"));
+  } catch {
+    return Response.json({ error: "Registry unreadable" }, { status: 500 });
+  }
+  const tools = Array.isArray(reg.tools) ? reg.tools : [];
+  const tool = tools.find((t) => t.name === toolName);
+  if (!tool) {
+    return Response.json({ error: `Tool '${toolName}' not found` }, { status: 404 });
+  }
+  reg.tools = tools.filter((t) => t.name !== toolName);
+
+  // Atomic-ish registry write (tmp + rename).
+  try {
+    const tmp = `${p}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(reg, null, 2) + "\n", "utf8");
+    await fs.rename(tmp, p);
+  } catch {
+    return Response.json({ error: "Failed to write registry" }, { status: 500 });
+  }
+
+  // Best-effort live cleanup so the tool disappears immediately.
+  const bin = tool.bin || tool.name;
+  const skillName = tool.skill?.name || tool.name;
+  const provider = tool.provider || tool.name;
+  const cid = await resolveContainer(sandbox);
+  if (cid) {
+    const rm = (target: string) =>
+      execFileAsync(DOCKER, ["exec", cid, "rm", "-rf", target], { timeout: 8000 }).catch(() => {});
+    await rm(`/usr/local/bin/${bin}`);
+    await rm(`/sandbox/.diffract-tools/${tool.name}`);
+    await rm(`/sandbox/.hermes/skills/diffract-tools/${skillName}`);
+  }
+  // Best-effort: detach + delete the host-side provider/credential.
+  try {
+    await execFileAsync(OPENSHELL, ["sandbox", "provider", "detach", sandbox, provider], { timeout: 12000 });
+  } catch {
+    /* ignore — provider may not be attached */
+  }
+  try {
+    await execFileAsync(OPENSHELL, ["provider", "delete", provider], { timeout: 12000 });
+  } catch {
+    /* ignore — provider may not exist or be shared */
+  }
+
+  return Response.json({ ok: true, removed: toolName });
 }

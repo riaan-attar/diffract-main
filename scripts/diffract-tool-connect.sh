@@ -78,7 +78,11 @@ for k in "${CONFIG_ENVS[@]:-}"; do [ -n "$k" ] && CRED_KEYS+=("$k"); done
 missing=()
 for k in "${CRED_KEYS[@]:-}"; do
   [ -z "$k" ] && continue
-  if [ -z "${!k:-}" ]; then missing+=("$k"); fi
+  # Read via printenv (not bash ${!k}) so lowercase and hyphenated key names
+  # (e.g. api_key, x-api-key) are detected — bash indirect expansion only
+  # works for valid shell identifiers. The value still comes from this
+  # process's env; OpenShell's --credential env-lookup reads it the same way.
+  if [ -z "$(printenv "$k" 2>/dev/null)" ]; then missing+=("$k"); fi
 done
 if [ "${#missing[@]}" -gt 0 ]; then
   echo "[connect] missing values in environment: ${missing[*]}" >&2
