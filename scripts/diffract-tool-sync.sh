@@ -61,11 +61,28 @@ connected_tools() {
 tool_hosts()    { jq -r --arg n "$1" '.tools[]|select(.name==$n)|.apiHosts[]?'  "$REGISTRY" 2>/dev/null; }
 tool_binaries() { jq -r --arg n "$1" '.tools[]|select(.name==$n)|.binaries[]?' "$REGISTRY" 2>/dev/null; }
 
+# Include a provider UNLESS OpenShell is reachable AND positively reports it
+# missing. A record can outlive its OpenShell provider (deleted out-of-band) —
+# emitting that stale name makes onboard's attach hard-fail at create with
+# "provider 'X' not found and 'X' is not a recognized provider type", which aborts
+# the whole deploy *after the sandbox is destroyed*. Dropping it lets the deploy
+# finish (the affected tool just isn't attached until reconnected). We still emit
+# when OpenShell itself can't be queried, preserving the gateway-independent
+# behaviour the connected-tools file was designed for.
+provider_present_or_unknown() {
+  "$OPENSHELL" provider get  "$1" >/dev/null 2>&1 && return 0   # provider exists -> include
+  "$OPENSHELL" provider list      >/dev/null 2>&1 && return 1   # OpenShell up but provider absent -> skip stale
+  return 0                                                      # OpenShell unreachable -> include (don't lose tools)
+}
+
 case "$MODE" in
   providers)
     # comma-separated list of connected tool provider names (for the onboard to
-    # attach at create via NEMOCLAW_SANDBOX_EXTRA_PROVIDERS)
-    connected_tools | paste -sd, - 2>/dev/null
+    # attach at create via NEMOCLAW_SANDBOX_EXTRA_PROVIDERS), minus any whose
+    # OpenShell provider no longer exists (would hard-fail the attach).
+    connected_tools | while IFS= read -r t; do
+      [ -n "$t" ] && provider_present_or_unknown "$t" && echo "$t"
+    done | paste -sd, - 2>/dev/null
     ;;
   egress)
     # Exit non-zero if ANY tool's egress failed to apply, so the caller (the

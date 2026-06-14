@@ -360,6 +360,40 @@ NEMOHERMES_GLOBAL_PATH=$(which nemohermes 2>/dev/null || true)
 cd "$PROJECT_ROOT"
 print_success "NemoClaw CLI installed globally"
 
+# Step 5.5: Build the Hermes sandbox base image from the LOCAL Dockerfile.base.
+#
+# WHY THIS IS REQUIRED (do not remove): `nemoclaw onboard` resolves the base image
+# via NemoClaw/src/lib/sandbox-base-image.ts. On a fresh clone sitting on
+# origin/main, baseImageInputsChangedSinceMain() returns false, so the resolver
+# PULLS ghcr.io/nvidia/nemoclaw/hermes-sandbox-base:latest — NVIDIA's UPSTREAM
+# image, which does NOT contain the Diffract additions baked into our
+# Dockerfile.base. Most importantly it lacks the `mcp` Python SDK (mcp==1.26.0),
+# without which every HTTP MCP server (Stitch, Zapier, …) fails in chat with
+# "mcp.client.streamable_http is not available" — and the uv venv has no pip, so it
+# cannot be added at runtime. It also predates the pty/Chromium layers.
+#
+# Building the image locally under the SAME :latest tag makes the resolver's
+# `docker image inspect` succeed and SKIP the remote pull (see resolvePulledCandidate),
+# so every fresh deploy gets a correct base image without a manual
+# `nemoclaw <sandbox> rebuild`. Idempotent: Docker's layer cache makes re-runs fast;
+# the first build takes several minutes. Mirrors dockerBuild() in the CLI exactly
+# (DOCKER_BUILDKIT=1; Dockerfile.base needs BuildKit for RUN --mount).
+print_header "Building Hermes Sandbox Base Image (bakes in mcp / pty / chromium)"
+HERMES_BASE_DOCKERFILE="$NEMOCLAW_DIR/agents/hermes/Dockerfile.base"
+HERMES_BASE_IMAGE="ghcr.io/nvidia/nemoclaw/hermes-sandbox-base:latest"
+if command -v docker >/dev/null 2>&1 && docker ps >/dev/null 2>&1 && [ -f "$HERMES_BASE_DOCKERFILE" ]; then
+    print_warning "Building $HERMES_BASE_IMAGE from local Dockerfile.base (first run: several minutes)..."
+    if DOCKER_BUILDKIT=1 docker build -f "$HERMES_BASE_DOCKERFILE" -t "$HERMES_BASE_IMAGE" "$NEMOCLAW_DIR"; then
+        print_success "Hermes base image built locally — onboard will use THIS (mcp/pty/chromium baked in), not the stale upstream image"
+    else
+        print_warning "Base image build FAILED — onboard would fall back to the upstream image and MCP-in-chat may not work."
+        print_warning "Re-run setup.sh, or after onboarding run: nemoclaw <sandbox> rebuild --yes"
+    fi
+else
+    print_warning "Docker unavailable or Dockerfile.base missing — skipping base image build."
+    print_warning "MCP-in-chat needs it; once Docker is up, re-run setup.sh (or 'nemoclaw <sandbox> rebuild')."
+fi
+
 # Step 6: Overlay custom Diffract branding onto the installed Hermes and
 # rebuild (web + TUI + Python). Runs in both local and VPS modes.
 apply_diffract_branding
@@ -732,8 +766,11 @@ EOF
     fi
 
     if [ -z "$DOMAIN" ]; then
-        print_warning "No domain name argument specified. Proxying on port 80..."
-        CADDY_CONFIG="srv1670849.hstgr.cloud {
+        print_warning "No domain name argument specified. Serving on port 80 for any host (use the VPS IP)..."
+        # ":80" matches ANY Host header on port 80, so this works on a bare IP or
+        # any hostname without hardcoding a domain (a fresh client VPS has neither).
+        # Pass a domain to setup.sh to get automatic HTTPS instead.
+        CADDY_CONFIG=":80 {
         redir /agent /agent/
         
         handle /v1/* {
